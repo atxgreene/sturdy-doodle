@@ -1,6 +1,8 @@
 # Mnemosyne Setup (WSL2 / Ubuntu)
 
-A reproducible install of the Mnemosyne agent stack alongside (not replacing) OpenClaw.
+A reproducible install of the Mnemosyne local-agent stack: `eternal-context` (base agent, ICMS memory, SDI selection, channels) + `mnemosyne-consciousness` (TurboQuant, metacognition, dream consolidation, autobiography) on top of a local Ollama runtime.
+
+This repo holds **only** the bootstrap script and wizard. The two Python packages live in their own repos and are cloned by `install-mnemosyne.sh`.
 
 ## What gets installed
 
@@ -28,21 +30,30 @@ sudo apt install -y git curl python3 python3-venv python3-pip
 
 ## Run the bootstrap
 
-The script lives at `C:\Users\austi\AppData\Mnemosyne-Setup\install-mnemosyne.sh`. From WSL:
+Clone this repo (or copy the three scripts into a Mnemosyne-Setup folder of your choice) and run the bootstrap from inside it. From WSL:
 
 ```bash
-bash /mnt/c/Users/austi/AppData/Mnemosyne-Setup/install-mnemosyne.sh
+git clone https://github.com/atxgreene/sturdy-doodle.git ~/mnemosyne-setup
+cd ~/mnemosyne-setup
+bash install-mnemosyne.sh
 ```
 
-Optional overrides (all env vars):
+Optional overrides (all via env vars — no CLI flags):
+
 ```bash
-MODEL=llama3.1:8b PROJECTS_DIR=$HOME/code/mnemosyne \
-  bash /mnt/c/Users/austi/AppData/Mnemosyne-Setup/install-mnemosyne.sh
+# Pick a different model and install location
+MODEL=llama3.1:8b PROJECTS_DIR=$HOME/code/mnemosyne bash install-mnemosyne.sh
 
 # Skip the ~2GB CUDA torch download — install CPU-only wheels (~200MB) instead.
 # Useful on hosts without GPU passthrough or when you don't care about
 # embedding-model speed.
-CPU_TORCH=1 bash /mnt/c/Users/austi/AppData/Mnemosyne-Setup/install-mnemosyne.sh
+CPU_TORCH=1 bash install-mnemosyne.sh
+
+# Fork override: track your own fork of either upstream repo
+ETERNAL_REPO=https://github.com/you/eternal-context.git \
+FANTASTIC_REPO=https://github.com/you/fantastic-disco.git \
+FANTASTIC_BRANCH=main \
+  bash install-mnemosyne.sh
 ```
 
 The script is **idempotent** — re-running it pulls latest from both repos, re-syncs deps, and skips anything already done. Partial-failure re-runs always re-write the `eternalcontext.pth` link via an `EXIT` trap, so a crashed run never leaves the venv in a half-linked state.
@@ -66,8 +77,12 @@ The script is **idempotent** — re-running it pulls latest from both repos, re-
 After the bootstrap finishes, run the interactive wizard to set up channel credentials:
 
 ```bash
-bash /mnt/c/Users/austi/AppData/Mnemosyne-Setup/mnemosyne-wizard.sh
+bash mnemosyne-wizard.sh
+# or, to force plain-text mode (no whiptail TUI):
+bash mnemosyne-wizard.sh --text
 ```
+
+The wizard auto-detects `whiptail` and uses it for a full-screen TUI when available; otherwise it falls back to plain prompts. Both paths produce the same `~/projects/mnemosyne/.env`.
 
 The wizard:
 
@@ -105,11 +120,11 @@ Two valid boot paths once the venv is ready:
 
 Recommendation: validate `python -m eternalcontext` first; switch the daily-driver entrypoint to `ConsciousnessLoop` only after you've confirmed the base agent is healthy. Don't make the switch as the *first* run — too many things can fail at once.
 
-## How this co-exists with OpenClaw
+## Compatibility
 
-- OpenClaw lives at `C:\Users\austi\AppData\Roaming\npm\node_modules\openclaw` and runs as a Windows login item ("OpenClaw Gateway"). **Untouched.**
-- Mnemosyne lives in WSL at `~/projects/mnemosyne/`. Different process tree, different filesystem, different ports (Ollama 11434, Mnemosyne REST 8000 if you start the server). No collisions.
-- Run them in parallel for as long as you want. Once Mnemosyne covers your daily workflows, you can uninstall OpenClaw separately.
+- The bootstrap installs **only** to `$PROJECTS_DIR` (default `~/projects/mnemosyne/`). It does not modify any other npm/Python/Go projects on the host. Only Ollama is installed system-wide, and only if missing.
+- Default ports: Ollama listens on `127.0.0.1:11434`; Mnemosyne's REST channel (if you enable it) listens on `127.0.0.1:8765` by default. If those collide with anything you're running, override `OLLAMA_HOST` and `MNEMOSYNE_REST_PORT` in `.env`.
+- `install-mnemosyne.sh` is idempotent and additive — running it on a host with other agent stacks installed won't disturb them.
 
 ## Uninstall
 
@@ -172,12 +187,46 @@ Open questions before writing the skill module (paste answers / a representative
 3. **Read-only or read-write?** Recommend **read-only for v1**. Daily-note appending and link rewriting are useful but blast-radius-large; better to land them as a separate `obsidian-write` skill once the read path is solid.
 4. **Frontmatter.** Should YAML frontmatter (tags, aliases, dataview fields) be exposed as separate query surfaces (e.g. `search_by_tag`), or treated as flat text inside the note body for v1? Lean v1: flat text. v2: structured.
 5. **Tool surface.** Reasonable v1 tools: `obsidian_search(query, limit=10)`, `obsidian_read(path)`, `obsidian_list_recent(days=7)`. All read from `OBSIDIAN_VAULT_PATH`. No write tools.
-6. **WSL path translation.** If the vault lives on the Windows side (`/mnt/c/Users/austi/Documents/Obsidian`), file watch performance is mediocre. Acceptable for v1 (queries only). If it becomes a problem, mirror to a WSL-native path or use `inotify` against the `/mnt/c` path with a longer poll interval.
+6. **WSL path translation.** If the vault lives on the Windows side (e.g. `/mnt/c/Users/<you>/Documents/Obsidian`), file-watch performance over `9p` is mediocre. Acceptable for v1 (queries are point-in-time). If it becomes a problem, mirror to a WSL-native path under `~/` or use `inotify` against the `/mnt/c` path with a longer poll interval.
 
 Once you can paste an existing skill file from `eternal-context/skills/`, the Obsidian skill drops in alongside it as a small additional module. The wizard already wires the env var.
 
-## Security note
+## Security model
 
-Both repos belong to your own GitHub account (`atxgreene`). The bootstrap pulls only from those two URLs over HTTPS plus the official Ollama installer. No third-party npm packages, no curl-pipe-bash from unknown sources beyond Ollama's own installer.
+**What gets stored where:**
 
-The recent npm `strapi-plugin-*` supply-chain attack (the one in the Hacker News article) does not affect this stack — Mnemosyne is pure Python and Ollama is Go. OpenClaw was also audited and found clean of those IoCs.
+| File | Location | Mode | Contains |
+|---|---|---|---|
+| `.env` | `$PROJECTS_DIR/.env` | `600` | Bot tokens, chat IDs, paths. **Never** committed. |
+| `.env.bak.<timestamp>` | `$PROJECTS_DIR/.env.bak.*` | `600` | Backup of previous `.env`, written by the wizard before each rewrite. |
+| `eternalcontext.pth` | venv `site-packages/` | default | Path string only. No secrets. |
+| `ollama.log` | `$PROJECTS_DIR/ollama.log` | default | Ollama daemon stderr. Should not contain secrets but is not audited. |
+
+**What `install-mnemosyne.sh` fetches over the network:**
+
+1. `https://ollama.com/install.sh` → piped to `sh`. This is the official Ollama installer; review it at <https://github.com/ollama/ollama/blob/main/scripts/install.sh> before running if you don't trust curl-pipe-sh.
+2. The two git repos pinned in `ETERNAL_REPO` and `FANTASTIC_REPO` (defaults: `atxgreene/eternal-context` and `atxgreene/fantastic-disco`). Override via env vars to use forks.
+3. `pypi.org` for Python packages via pip. The CPU-torch path additionally hits `download.pytorch.org/whl/cpu`.
+4. `registry.ollama.ai` for the model pull (one-time, ~5 GB for `qwen3:8b`).
+
+No third-party shell installers, no telemetry, no callbacks.
+
+**Token handling:**
+
+- The wizard prompts for the Telegram bot token via `read -s` (text mode) or `whiptail --passwordbox` (TUI mode). The token is **never** echoed to the screen and **never** appears in shell history.
+- API calls to `api.telegram.org` go through `python3 urllib.request` with the token passed as an env var (`_TG_TOKEN`), so the token does **not** appear in `argv` (`/proc/<pid>/cmdline`, world-readable). It only lives in `/proc/<pid>/environ` of the short-lived python process, which is mode `600`.
+- The `.env` file is created with `umask 077` inside a subshell so the file is mode `600` from the moment it exists — there is no TOCTOU window where it briefly has wider perms.
+- The wizard's preview screen masks tokens (`123456…(hidden)`) and counts but does not display preserved unknown keys (which may also be secrets).
+- Backups (`.env.bak.<timestamp>`) are explicitly `chmod 600`'d after `cp`, since `cp` does not preserve permissions by default.
+
+**Supply-chain notes:**
+
+- Mnemosyne is pure Python + Ollama (Go). It does not pull from npm. The recurring `strapi-plugin-*` npm supply-chain attacks do not apply.
+- The `pyproject.toml` patch (step 4b) is a build-system fix only; it does not change any runtime dependency.
+- Pin and review the upstream commit hashes of `eternal-context` and `fantastic-disco` if you're deploying to a security-sensitive host. The bootstrap currently follows branches, not pinned commits — easy to change in `clone_or_pull`.
+
+**Things to know if you fork or open-source this repo:**
+
+- `.gitignore` excludes `.env`, `*.bak.*`, `*.log`, `__pycache__/`, `.venv/`, and a few other footguns. Re-check `git status` before any commit.
+- The repo has **no LICENSE file by default** — pick one before publishing. If you're not sure, MIT is a safe default for tooling like this. Add it as `LICENSE` at the repo root.
+- Run `git log -p -- .env*` before publishing. If `.env` has ever been committed, even briefly, the secret is in history forever — rotate the token, then [purge the history](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) or start fresh.

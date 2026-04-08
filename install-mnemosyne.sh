@@ -25,6 +25,14 @@
 #    PROJECTS_DIR=$HOME/code bash install-mnemosyne.sh   # override location
 #    CPU_TORCH=1 bash install-mnemosyne.sh           # force CPU-only torch wheels
 #                                                    # (~200MB vs ~2GB CUDA)
+#
+#  All config is via env vars (no CLI flags):
+#    PROJECTS_DIR        install root (default: $HOME/projects/mnemosyne)
+#    MODEL               Ollama model (default: qwen3:8b)
+#    CPU_TORCH=1         install CPU-only torch wheels
+#    ETERNAL_REPO        eternal-context git URL (override for forks)
+#    FANTASTIC_REPO      fantastic-disco git URL (override for forks)
+#    FANTASTIC_BRANCH    fantastic-disco branch to track
 # ==============================================================================
 
 set -euo pipefail
@@ -37,9 +45,9 @@ PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects/mnemosyne}"
 MODEL="${MODEL:-qwen3:8b}"
 PY_MIN_MAJOR=3
 PY_MIN_MINOR=11
-ETERNAL_REPO="https://github.com/atxgreene/eternal-context.git"
-FANTASTIC_REPO="https://github.com/atxgreene/fantastic-disco.git"
-FANTASTIC_BRANCH="claude/review-mnemosyne-agent-5bb7m"
+ETERNAL_REPO="${ETERNAL_REPO:-https://github.com/atxgreene/eternal-context.git}"
+FANTASTIC_REPO="${FANTASTIC_REPO:-https://github.com/atxgreene/fantastic-disco.git}"
+FANTASTIC_BRANCH="${FANTASTIC_BRANCH:-claude/review-mnemosyne-agent-5bb7m}"
 CPU_TORCH="${CPU_TORCH:-0}"
 
 # ---- Pretty output ------------------------------------------------------------

@@ -6,9 +6,13 @@
 #  Walks through:
 #    1. LLM backend (Ollama host + model, validated against running daemon)
 #    2. Telegram channel (bot token validated via api.telegram.org/getMe,
-#       chat ID auto-detected from /getUpdates)
+#       chat ID auto-detected from /getUpdates) — token never appears in argv
 #    3. Obsidian vault path (env-var slot for the upcoming skill — preview only)
-#    4. Writes ~/projects/mnemosyne/.env (mode 600) with backup of any prior file
+#    4. Writes ~/projects/mnemosyne/.env (mode 600) atomically
+#
+#  UI modes:
+#    - whiptail TUI (auto-detected, default if installed)
+#    - plain text prompts (fallback, or forced via --text)
 #
 #  Safe to re-run: reads existing .env, offers current values as defaults,
 #  preserves any keys it doesn't manage (so Discord/Slack/REST creds you add
@@ -16,6 +20,8 @@
 #
 #  Usage:
 #    bash mnemosyne-wizard.sh
+#    bash mnemosyne-wizard.sh --text          # force text mode (no whiptail)
+#    bash mnemosyne-wizard.sh --help
 #    PROJECTS_DIR=$HOME/code/mnemosyne bash mnemosyne-wizard.sh
 # ==============================================================================
 
@@ -31,7 +37,17 @@ PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects/mnemosyne}"
 ENV_FILE="$PROJECTS_DIR/.env"
 VENV="$PROJECTS_DIR/.venv"
 
-# ---- pretty output ------------------------------------------------------------
+# ---- args ---------------------------------------------------------------------
+FORCE_TEXT=0
+for arg in "$@"; do
+  case "$arg" in
+    --text) FORCE_TEXT=1 ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    *) echo "unknown arg: $arg" >&2; exit 2 ;;
+  esac
+done
+
+# ---- pretty output (text mode) ------------------------------------------------
 c_blue=$'\033[1;34m'; c_green=$'\033[1;32m'; c_yellow=$'\033[1;33m'
 c_red=$'\033[1;31m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
 log()  { printf "%s==>%s %s\n" "$c_blue"  "$c_off" "$*"; }
@@ -43,13 +59,109 @@ hr()   { printf "%s────────────────────�
 
 # ---- preflight ----------------------------------------------------------------
 [ -d "$PROJECTS_DIR" ] || die "$PROJECTS_DIR not found. Run install-mnemosyne.sh first."
-command -v curl    >/dev/null || die "curl required"
 command -v python3 >/dev/null || die "python3 required"
 
-# ---- load existing .env (preserves unknown keys) ------------------------------
+# curl is optional — only needed for the LLM backend reachability check.
+# All Telegram API calls go through python3 (urllib) so the token never
+# leaks into argv via curl's URL.
+
+# ---- TUI detection ------------------------------------------------------------
+# Use whiptail iff: it's installed AND stdin is a tty AND --text wasn't passed.
+TUI=0
+if [ "$FORCE_TEXT" = 0 ] && [ -t 0 ] && command -v whiptail >/dev/null 2>&1; then
+  TUI=1
+fi
+
+WIZ_TITLE="Mnemosyne setup"
+
+# ---- TUI helpers --------------------------------------------------------------
+# All helpers fall back to plain prompts when whiptail is unavailable. They
+# echo the result to stdout. yesno returns 0/1 via exit code.
+
+tui_msg() {
+  # tui_msg "title" "message" — \n in message is interpreted as a newline
+  local title="$1" msg="$2"
+  if [ "$TUI" = 1 ]; then
+    whiptail --title "$title" --msgbox "$msg" 14 70
+  else
+    hr; printf "%s%s%s\n" "$c_blue" "$title" "$c_off"; hr
+    printf '%b\n' "$msg"; echo
+  fi
+}
+
+tui_input() {
+  # tui_input "title" "prompt" "default" -> stdout: value
+  local title="$1" prompt="$2" default="${3:-}"
+  if [ "$TUI" = 1 ]; then
+    whiptail --title "$title" --inputbox "$prompt" 10 70 "$default" 3>&1 1>&2 2>&3
+  else
+    local reply
+    if [ -n "$default" ]; then
+      read -r -p "  $prompt [$default]: " reply
+      printf '%s' "${reply:-$default}"
+    else
+      read -r -p "  $prompt: " reply
+      printf '%s' "$reply"
+    fi
+  fi
+}
+
+tui_password() {
+  # tui_password "title" "prompt" -> stdout: value (no default; whiptail
+  # cannot pre-fill a password box safely)
+  local title="$1" prompt="$2"
+  if [ "$TUI" = 1 ]; then
+    whiptail --title "$title" --passwordbox "$prompt" 10 70 3>&1 1>&2 2>&3
+  else
+    local reply
+    read -r -s -p "  $prompt: " reply
+    echo
+    printf '%s' "$reply"
+  fi
+}
+
+tui_yesno() {
+  # tui_yesno "title" "prompt" "default(y|n)" -> exit 0 if yes, 1 if no
+  local title="$1" prompt="$2" default="${3:-n}"
+  if [ "$TUI" = 1 ]; then
+    if [ "$default" = "y" ]; then
+      whiptail --title "$title" --yesno "$prompt" 10 70
+    else
+      whiptail --title "$title" --defaultno --yesno "$prompt" 10 70
+    fi
+  else
+    local reply
+    read -r -p "  $prompt [$default]: " reply
+    reply="${reply:-$default}"
+    [[ "$reply" =~ ^[Yy] ]]
+  fi
+}
+
+tui_menu() {
+  # tui_menu "title" "prompt" key1 label1 key2 label2 ... -> stdout: selected key
+  local title="$1" prompt="$2"; shift 2
+  if [ "$TUI" = 1 ]; then
+    whiptail --title "$title" --menu "$prompt" 16 70 6 "$@" 3>&1 1>&2 2>&3
+  else
+    echo "  $prompt"
+    local i=1 keys=()
+    while [ $# -gt 0 ]; do
+      keys+=("$1")
+      printf "    %d) %s\n" "$i" "$2"
+      i=$((i+1)); shift 2
+    done
+    local choice
+    read -r -p "  selection: " choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#keys[@]} )); then
+      printf '%s' "${keys[$((choice-1))]}"
+    fi
+    return 0
+  fi
+}
+
+# ---- .env loader (preserves unknown keys) -------------------------------------
 declare -A CFG
 if [ -f "$ENV_FILE" ]; then
-  log "Found existing .env at $ENV_FILE — values offered as defaults"
   while IFS=$'\t' read -r k v; do
     [ -z "$k" ] && continue
     CFG[$k]="$v"
@@ -72,131 +184,35 @@ fi
 
 cur() { printf '%s' "${CFG[$1]:-${2:-}}"; }
 
-# ---- prompt helpers -----------------------------------------------------------
-ask() {
-  local prompt="$1" default="${2:-}" reply
-  if [ -n "$default" ]; then
-    read -r -p "$prompt [$default]: " reply
-    printf '%s' "${reply:-$default}"
-  else
-    read -r -p "$prompt: " reply
-    printf '%s' "$reply"
-  fi
-}
-
-ask_secret() {
-  local prompt="$1" default="${2:-}" reply hint=""
-  [ -n "$default" ] && hint=" (current: ${default:0:6}…, enter to keep)"
-  read -r -s -p "$prompt$hint: " reply
-  echo
-  printf '%s' "${reply:-$default}"
-}
-
-ask_yn() {
-  local prompt="$1" default="${2:-n}" reply
-  read -r -p "$prompt [$default]: " reply
-  reply="${reply:-$default}"
-  [[ "$reply" =~ ^[Yy] ]]
-}
-
-# ---- header -------------------------------------------------------------------
-clear 2>/dev/null || true
-hr
-printf "%s  Mnemosyne setup wizard%s\n" "$c_green" "$c_off"
-hr
-echo
-echo "Configures channel credentials and writes them to:"
-echo "  $ENV_FILE"
-echo
-echo "Existing values are reused unless you overwrite them. ^C anytime to abort."
-echo
-
-# ---- step 1: LLM backend ------------------------------------------------------
-log "Step 1/4: LLM backend"
-OLLAMA_HOST=$(ask "Ollama host" "$(cur OLLAMA_HOST http://localhost:11434)")
-OLLAMA_MODEL=$(ask "Model name" "$(cur OLLAMA_MODEL qwen3:8b)")
-
-if curl -fsS --max-time 5 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
-  ok "Ollama responding at $OLLAMA_HOST"
-  if curl -fsS --max-time 5 "$OLLAMA_HOST/api/tags" 2>/dev/null \
-    | python3 -c "
-import sys, json
-target = '$OLLAMA_MODEL'
-try:
-    d = json.load(sys.stdin)
-    names = [m.get('name','') for m in d.get('models',[])]
-    sys.exit(0 if target in names else 1)
-except Exception:
+# ---- Telegram API helper (token via env var, never argv) ----------------------
+# Usage: tg_api <token> <action>  -> stdout per action, exit 0 ok, !=0 fail
+#   getMe       -> prints bot username
+#   getUpdates  -> prints "<chat_id>\t<label>" lines for unique chats
+tg_api() {
+  local token="$1" action="$2"
+  _TG_TOKEN="$token" python3 - "$action" <<'PY'
+import os, sys, json, urllib.request, urllib.error
+token = os.environ.get("_TG_TOKEN", "")
+if not token:
     sys.exit(2)
-" 2>/dev/null
-  then
-    ok "Model $OLLAMA_MODEL present"
-  else
-    warn "Model $OLLAMA_MODEL not in ollama list — pull with: ollama pull $OLLAMA_MODEL"
-  fi
-else
-  warn "Ollama at $OLLAMA_HOST not responding (continuing — config will still be written)"
-fi
-echo
-
-# ---- step 2: Telegram channel -------------------------------------------------
-log "Step 2/4: Telegram channel"
-echo "Mnemosyne supports Telegram, Discord, Slack, and a local REST channel."
-echo "This wizard configures Telegram only — others coming."
-echo
-
-TELEGRAM_BOT_TOKEN=""
-TELEGRAM_ALLOWED_CHAT_IDS=""
-BOT_NAME=""
-TG_DEFAULT="n"
-[ -n "$(cur TELEGRAM_BOT_TOKEN)" ] && TG_DEFAULT="y"
-
-if ask_yn "Enable Telegram?" "$TG_DEFAULT"; then
-  echo
-  printf "%sGet a token from @BotFather on Telegram (/newbot).%s\n" "$c_dim" "$c_off"
-  TELEGRAM_BOT_TOKEN=$(ask_secret "Bot token" "$(cur TELEGRAM_BOT_TOKEN)")
-
-  if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-    warn "No token entered — skipping Telegram"
-  else
-    log "Validating token via api.telegram.org/getMe"
-    if BOTINFO=$(curl -fsS --max-time 8 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" 2>/dev/null); then
-      BOT_NAME=$(printf '%s' "$BOTINFO" | python3 -c '
-import sys, json
+action = sys.argv[1]
+url = f"https://api.telegram.org/bot{token}/{action}"
 try:
-    d = json.load(sys.stdin)
-    if d.get("ok"):
-        print(d["result"].get("username",""))
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=8) as r:
+        data = json.load(r)
+except urllib.error.HTTPError:
+    sys.exit(1)
+except (urllib.error.URLError, TimeoutError):
+    sys.exit(3)
 except Exception:
-    pass
-' 2>/dev/null || true)
-    fi
-
-    if [ -n "$BOT_NAME" ]; then
-      ok "Bot validated: @$BOT_NAME"
-      echo
-      echo "Mnemosyne only responds to chat IDs in TELEGRAM_ALLOWED_CHAT_IDS."
-      echo "If you don't know your chat ID:"
-      echo "  1. Open Telegram and message @$BOT_NAME (any text)"
-      echo "  2. Press enter here to scan recent updates"
-      echo "Or type a chat ID directly (e.g. 12345678 or 12345678,87654321)."
-      echo
-      read -r -p "chat ID(s) or [enter] to scan: " CHAT_INPUT
-
-      if [[ "$CHAT_INPUT" =~ ^-?[0-9]+(,-?[0-9]+)*$ ]]; then
-        TELEGRAM_ALLOWED_CHAT_IDS="$CHAT_INPUT"
-        ok "Using chat ID(s): $TELEGRAM_ALLOWED_CHAT_IDS"
-      else
-        log "Polling /getUpdates"
-        UPDATES=$(curl -fsS --max-time 8 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates" 2>/dev/null || echo "")
-        DETECTED=$(printf '%s' "$UPDATES" | python3 - <<'PY' 2>/dev/null || true
-import sys, json
-try:
-    d = json.loads(sys.stdin.read())
-    if not d.get("ok"):
-        sys.exit(1)
+    sys.exit(1)
+if not data.get("ok"):
+    sys.exit(1)
+if action == "getMe":
+    print(data["result"].get("username", ""))
+elif action == "getUpdates":
     seen = {}
-    for u in d.get("result", []):
+    for u in data.get("result", []):
         msg = u.get("message") or u.get("channel_post") or u.get("edited_message") or {}
         chat = msg.get("chat") or {}
         cid = chat.get("id")
@@ -206,54 +222,199 @@ try:
         seen[cid] = label
     for cid, label in seen.items():
         print(f"{cid}\t{label}")
-except Exception:
-    sys.exit(1)
 PY
-)
+}
+
+# ---- Ollama reachability check ------------------------------------------------
+ollama_check() {
+  local host="$1" model="$2"
+  python3 - "$host" "$model" <<'PY'
+import sys, json, urllib.request, urllib.error
+host, model = sys.argv[1], sys.argv[2]
+try:
+    with urllib.request.urlopen(f"{host}/api/tags", timeout=5) as r:
+        data = json.load(r)
+except Exception:
+    print("unreachable")
+    sys.exit(0)
+names = [m.get("name", "") for m in data.get("models", [])]
+print("present" if model in names else "missing")
+PY
+}
+
+# ---- header -------------------------------------------------------------------
+if [ "$TUI" = 1 ]; then
+  whiptail --title "$WIZ_TITLE" --msgbox \
+"This wizard configures channel credentials for Mnemosyne and writes them to:
+
+  $ENV_FILE
+
+Existing values are reused unless you overwrite them. The .env file will
+be created with mode 600 (owner-readable only). Press Esc/Cancel anytime
+to abort." 16 70
+else
+  clear 2>/dev/null || true
+  hr
+  printf "%s  Mnemosyne setup wizard%s\n" "$c_green" "$c_off"
+  hr
+  echo
+  echo "Configures channel credentials and writes them to:"
+  echo "  $ENV_FILE"
+  echo
+  echo "Existing values are reused unless you overwrite them. ^C anytime to abort."
+  echo "Mode: $([ "$TUI" = 1 ] && echo whiptail || echo text)"
+  echo
+fi
+
+# ---- step 1: LLM backend ------------------------------------------------------
+[ "$TUI" = 0 ] && log "Step 1/4: LLM backend"
+
+OLLAMA_HOST=$(tui_input "$WIZ_TITLE — LLM backend (1/4)" \
+  "Ollama API base URL" "$(cur OLLAMA_HOST http://localhost:11434)")
+OLLAMA_MODEL=$(tui_input "$WIZ_TITLE — LLM backend (1/4)" \
+  "Model name" "$(cur OLLAMA_MODEL qwen3:8b)")
+
+OLLAMA_STATUS=$(ollama_check "$OLLAMA_HOST" "$OLLAMA_MODEL" 2>/dev/null)
+OLLAMA_STATUS="${OLLAMA_STATUS:-unreachable}"
+case "$OLLAMA_STATUS" in
+  present)
+    [ "$TUI" = 1 ] && tui_msg "Ollama" "Daemon at $OLLAMA_HOST is responding.\nModel '$OLLAMA_MODEL' is present." \
+                  || ok "Ollama responding; model $OLLAMA_MODEL present"
+    ;;
+  missing)
+    [ "$TUI" = 1 ] && tui_msg "Ollama" "Daemon is up but model '$OLLAMA_MODEL' is not pulled.\n\nPull it with:\n  ollama pull $OLLAMA_MODEL" \
+                  || warn "Model $OLLAMA_MODEL not in ollama list — pull with: ollama pull $OLLAMA_MODEL"
+    ;;
+  *)
+    [ "$TUI" = 1 ] && tui_msg "Ollama" "Daemon at $OLLAMA_HOST is not responding.\n\nThe wizard will still write your config — start Ollama later." \
+                  || warn "Ollama at $OLLAMA_HOST not responding (config will still be written)"
+    ;;
+esac
+
+# ---- step 2: Telegram channel -------------------------------------------------
+[ "$TUI" = 0 ] && { echo; log "Step 2/4: Telegram channel"; }
+
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_ALLOWED_CHAT_IDS=""
+BOT_NAME=""
+
+# Default to "yes" iff there's already a token to keep
+TG_DEFAULT="n"
+[ -n "$(cur TELEGRAM_BOT_TOKEN)" ] && TG_DEFAULT="y"
+
+if tui_yesno "$WIZ_TITLE — Telegram (2/4)" \
+  "Configure Telegram channel?
+
+(Discord, Slack, and REST channels are roadmap — wizard support coming.)" "$TG_DEFAULT"; then
+
+  EXISTING_TOKEN="$(cur TELEGRAM_BOT_TOKEN)"
+  KEEP=0
+  if [ -n "$EXISTING_TOKEN" ]; then
+    if tui_yesno "$WIZ_TITLE — Telegram" \
+      "Keep existing bot token (${EXISTING_TOKEN:0:6}...)?" "y"; then
+      TELEGRAM_BOT_TOKEN="$EXISTING_TOKEN"
+      KEEP=1
+    fi
+  fi
+
+  if [ "$KEEP" = 0 ]; then
+    [ "$TUI" = 1 ] && tui_msg "Telegram" "Get a token from @BotFather on Telegram (/newbot).\n\nThe next prompt is hidden — paste your bot token and press Enter." \
+                  || printf "%sGet a token from @BotFather on Telegram (/newbot).%s\n" "$c_dim" "$c_off"
+    TELEGRAM_BOT_TOKEN=$(tui_password "$WIZ_TITLE — Telegram" "Bot token (hidden):")
+  fi
+
+  if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+    tui_msg "Telegram" "No token entered — skipping Telegram setup."
+  else
+    BOT_NAME=$(tg_api "$TELEGRAM_BOT_TOKEN" getMe 2>/dev/null || true)
+
+    if [ -z "$BOT_NAME" ]; then
+      tui_msg "Telegram" "Token rejected by api.telegram.org, or network is unreachable.\n\nDouble-check the token and re-run the wizard."
+      TELEGRAM_BOT_TOKEN=""
+    else
+      tui_msg "Telegram" "Bot validated: @$BOT_NAME"
+
+      tui_msg "Telegram — chat IDs" \
+"Mnemosyne only responds to chat IDs in TELEGRAM_ALLOWED_CHAT_IDS.
+
+To find your chat ID:
+  1. Open Telegram and message @$BOT_NAME (any text)
+  2. Continue this wizard — it will scan recent updates
+
+You can also enter chat IDs directly (comma-separated)."
+
+      CHAT_INPUT=$(tui_input "$WIZ_TITLE — Telegram chat IDs" \
+        "chat ID(s), or leave blank to scan getUpdates" "")
+
+      if [[ "$CHAT_INPUT" =~ ^-?[0-9]+(,-?[0-9]+)*$ ]]; then
+        TELEGRAM_ALLOWED_CHAT_IDS="$CHAT_INPUT"
+      else
+        DETECTED=$(tg_api "$TELEGRAM_BOT_TOKEN" getUpdates 2>/dev/null || true)
         if [ -n "$DETECTED" ]; then
-          echo
-          echo "Recent chats that messaged @$BOT_NAME:"
-          printf '%s\n' "$DETECTED" | awk -F'\t' '{printf "  %s\t%s\n", $1, $2}'
-          echo
-          DEFAULT_ID=$(printf '%s' "$DETECTED" | head -1 | cut -f1)
-          TELEGRAM_ALLOWED_CHAT_IDS=$(ask "Allowed chat IDs (comma-separated)" "$DEFAULT_ID")
+          if [ "$TUI" = 1 ]; then
+            # Build menu items: KEY = chat_id, label = "chat_id — name"
+            menu_args=()
+            while IFS=$'\t' read -r cid label; do
+              [ -z "$cid" ] && continue
+              menu_args+=("$cid" "$label")
+            done <<< "$DETECTED"
+            menu_args+=("MANUAL" "Type a different chat ID manually")
+            PICK=$(tui_menu "$WIZ_TITLE — Telegram chat IDs" \
+              "Recent chats that messaged @$BOT_NAME (pick one):" "${menu_args[@]}")
+            if [ "$PICK" = "MANUAL" ] || [ -z "$PICK" ]; then
+              TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
+                "Allowed chat IDs (comma-separated)" "$(cur TELEGRAM_ALLOWED_CHAT_IDS)")
+            else
+              TELEGRAM_ALLOWED_CHAT_IDS="$PICK"
+            fi
+          else
+            echo
+            echo "  Recent chats that messaged @$BOT_NAME:"
+            printf '%s\n' "$DETECTED" | awk -F'\t' '{printf "    %s\t%s\n", $1, $2}'
+            echo
+            DEFAULT_ID=$(printf '%s' "$DETECTED" | head -1 | cut -f1)
+            TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
+              "Allowed chat IDs (comma-separated)" "$DEFAULT_ID")
+          fi
         else
-          warn "No updates found. Message @$BOT_NAME first, then re-run the wizard,"
-          warn "or enter a chat ID manually:"
-          TELEGRAM_ALLOWED_CHAT_IDS=$(ask "chat ID(s)" "$(cur TELEGRAM_ALLOWED_CHAT_IDS)")
+          tui_msg "Telegram — chat IDs" \
+"No updates found.
+
+Message @$BOT_NAME from your Telegram client first, then re-run the wizard.
+
+You can also enter a chat ID manually on the next prompt."
+          TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
+            "chat ID(s)" "$(cur TELEGRAM_ALLOWED_CHAT_IDS)")
         fi
       fi
-    else
-      err "Token rejected by api.telegram.org. Double-check it and re-run."
-      TELEGRAM_BOT_TOKEN=""
     fi
   fi
 fi
-echo
 
 # ---- step 3: Obsidian skill (preview) -----------------------------------------
-log "Step 3/4: Obsidian skill (preview)"
-echo "Mnemosyne will eventually expose your Obsidian vault as a skill."
-echo "This step only writes the path to .env — the skill module isn't wired up yet."
-echo
+[ "$TUI" = 0 ] && { echo; log "Step 3/4: Obsidian skill (preview)"; }
+
 OBSIDIAN_VAULT_PATH=""
 OBS_DEFAULT="n"
 [ -n "$(cur OBSIDIAN_VAULT_PATH)" ] && OBS_DEFAULT="y"
-if ask_yn "Configure Obsidian vault path now?" "$OBS_DEFAULT"; then
-  OBSIDIAN_VAULT_PATH=$(ask "Vault path (absolute, accessible from WSL)" \
-    "$(cur OBSIDIAN_VAULT_PATH /mnt/c/Users/austi/Documents/Obsidian)")
-  if [ -d "$OBSIDIAN_VAULT_PATH" ]; then
-    ok "Vault directory exists"
-  else
-    warn "Path does not exist or is not accessible — saving anyway"
+
+if tui_yesno "$WIZ_TITLE — Obsidian (3/4)" \
+  "Configure Obsidian vault path?
+
+The wizard will only write the path to .env. The actual Obsidian skill
+module is roadmap — see SETUP.md for the design questions." "$OBS_DEFAULT"; then
+
+  OBSIDIAN_VAULT_PATH=$(tui_input "$WIZ_TITLE — Obsidian" \
+    "Vault path (absolute, accessible from this shell)" "$(cur OBSIDIAN_VAULT_PATH)")
+  if [ -n "$OBSIDIAN_VAULT_PATH" ] && [ ! -d "$OBSIDIAN_VAULT_PATH" ]; then
+    tui_msg "Obsidian" "Path does not exist or is not accessible:\n  $OBSIDIAN_VAULT_PATH\n\nSaving anyway — you can fix it later."
   fi
 fi
-echo
 
 # ---- step 4: write .env -------------------------------------------------------
-log "Step 4/4: write $ENV_FILE"
+[ "$TUI" = 0 ] && { echo; log "Step 4/4: write $ENV_FILE"; }
 
-# Merge new values into preserved CFG
+# Merge new values into preserved CFG (unset = drop)
 update() {
   local k="$1" v="$2"
   if [ -n "$v" ]; then
@@ -268,89 +429,132 @@ update TELEGRAM_BOT_TOKEN "$TELEGRAM_BOT_TOKEN"
 update TELEGRAM_ALLOWED_CHAT_IDS "$TELEGRAM_ALLOWED_CHAT_IDS"
 update OBSIDIAN_VAULT_PATH "$OBSIDIAN_VAULT_PATH"
 
-# Preview (with masked token)
-echo
-echo "Preview:"
-hr
-echo "OLLAMA_HOST=${CFG[OLLAMA_HOST]:-}"
-echo "OLLAMA_MODEL=${CFG[OLLAMA_MODEL]:-}"
-if [ -n "${CFG[TELEGRAM_BOT_TOKEN]:-}" ]; then
-  echo "TELEGRAM_BOT_TOKEN=${CFG[TELEGRAM_BOT_TOKEN]:0:6}…(hidden)"
-  echo "TELEGRAM_ALLOWED_CHAT_IDS=${CFG[TELEGRAM_ALLOWED_CHAT_IDS]:-}"
-fi
-if [ -n "${CFG[OBSIDIAN_VAULT_PATH]:-}" ]; then
-  echo "OBSIDIAN_VAULT_PATH=${CFG[OBSIDIAN_VAULT_PATH]}"
-fi
-hr
-
-if ! ask_yn "Write to $ENV_FILE?" "y"; then
-  warn "Aborted. No file written."
-  exit 0
-fi
-
-# Backup existing
-if [ -f "$ENV_FILE" ]; then
-  ts=$(date +%Y%m%d-%H%M%S)
-  cp "$ENV_FILE" "$ENV_FILE.bak.$ts"
-  ok "Backed up to $ENV_FILE.bak.$ts"
-fi
-
-# Write
-{
-  echo "# Mnemosyne credentials — NEVER commit this file"
-  echo "# Written by mnemosyne-wizard.sh on $(date -Iseconds)"
-  echo
-  echo "# --- LLM backend ---"
-  echo "OLLAMA_HOST=${CFG[OLLAMA_HOST]:-http://localhost:11434}"
-  echo "OLLAMA_MODEL=${CFG[OLLAMA_MODEL]:-qwen3:8b}"
-  echo
-  echo "# --- Telegram ---"
+# Build preview (token masked, never raw)
+build_preview() {
+  echo "OLLAMA_HOST=${CFG[OLLAMA_HOST]:-}"
+  echo "OLLAMA_MODEL=${CFG[OLLAMA_MODEL]:-}"
   if [ -n "${CFG[TELEGRAM_BOT_TOKEN]:-}" ]; then
-    echo "TELEGRAM_BOT_TOKEN=${CFG[TELEGRAM_BOT_TOKEN]}"
+    echo "TELEGRAM_BOT_TOKEN=${CFG[TELEGRAM_BOT_TOKEN]:0:6}…(hidden)"
     echo "TELEGRAM_ALLOWED_CHAT_IDS=${CFG[TELEGRAM_ALLOWED_CHAT_IDS]:-}"
-  else
-    echo "# TELEGRAM_BOT_TOKEN="
-    echo "# TELEGRAM_ALLOWED_CHAT_IDS="
   fi
-  echo
-  echo "# --- Obsidian skill (preview, not yet wired) ---"
   if [ -n "${CFG[OBSIDIAN_VAULT_PATH]:-}" ]; then
     echo "OBSIDIAN_VAULT_PATH=${CFG[OBSIDIAN_VAULT_PATH]}"
-  else
-    echo "# OBSIDIAN_VAULT_PATH="
   fi
-  echo
-  # Preserve any other keys (Discord/Slack/REST/whatever the user added)
-  printed_other=0
+  # Show preserved unknown keys (count only — don't echo their values, may be secrets)
+  local extra_count=0
   for k in "${!CFG[@]}"; do
     case "$k" in
       OLLAMA_HOST|OLLAMA_MODEL|TELEGRAM_BOT_TOKEN|TELEGRAM_ALLOWED_CHAT_IDS|OBSIDIAN_VAULT_PATH) ;;
-      *)
-        if [ "$printed_other" = 0 ]; then
-          echo "# --- Other (preserved from previous .env) ---"
-          printed_other=1
-        fi
-        printf '%s=%s\n' "$k" "${CFG[$k]}"
-        ;;
+      *) extra_count=$((extra_count+1)) ;;
     esac
   done
-} > "$ENV_FILE"
-chmod 600 "$ENV_FILE"
-ok "Wrote $ENV_FILE (mode 600)"
+  if [ "$extra_count" -gt 0 ]; then
+    echo "(${extra_count} preserved key(s) from existing .env)"
+  fi
+  return 0
+}
 
-echo
-hr
-ok "Wizard complete"
-hr
-echo
-echo "To boot the agent with these settings:"
-echo "  source $VENV/bin/activate"
-echo "  set -a; . $ENV_FILE; set +a"
-echo "  cd $PROJECTS_DIR/eternal-context/skills/eternal-context"
-echo "  python -m eternalcontext"
-echo
+PREVIEW="$(build_preview)"
+
+if [ "$TUI" = 1 ]; then
+  if ! whiptail --title "$WIZ_TITLE — confirm" --yesno \
+"Write the following to $ENV_FILE?
+
+$PREVIEW" 20 72; then
+    tui_msg "Aborted" "No file written."
+    exit 0
+  fi
+else
+  echo
+  echo "Preview:"
+  hr
+  printf '%s\n' "$PREVIEW"
+  hr
+  if ! tui_yesno "$WIZ_TITLE" "Write to $ENV_FILE?" "y"; then
+    warn "Aborted. No file written."
+    exit 0
+  fi
+fi
+
+# Backup existing .env (mode 600 explicit — cp does NOT preserve mode by default)
+if [ -f "$ENV_FILE" ]; then
+  ts=$(date +%Y%m%d-%H%M%S)
+  BACKUP="$ENV_FILE.bak.$ts"
+  cp "$ENV_FILE" "$BACKUP"
+  chmod 600 "$BACKUP"
+fi
+
+# Atomic write with restrictive umask so the file is mode 600 from creation
+TMP_ENV="$ENV_FILE.tmp.$$"
+(
+  umask 077
+  {
+    echo "# Mnemosyne credentials — NEVER commit this file"
+    echo "# Written by mnemosyne-wizard.sh on $(date -Iseconds)"
+    echo
+    echo "# --- LLM backend ---"
+    echo "OLLAMA_HOST=${CFG[OLLAMA_HOST]:-http://localhost:11434}"
+    echo "OLLAMA_MODEL=${CFG[OLLAMA_MODEL]:-qwen3:8b}"
+    echo
+    echo "# --- Telegram ---"
+    if [ -n "${CFG[TELEGRAM_BOT_TOKEN]:-}" ]; then
+      echo "TELEGRAM_BOT_TOKEN=${CFG[TELEGRAM_BOT_TOKEN]}"
+      echo "TELEGRAM_ALLOWED_CHAT_IDS=${CFG[TELEGRAM_ALLOWED_CHAT_IDS]:-}"
+    else
+      echo "# TELEGRAM_BOT_TOKEN="
+      echo "# TELEGRAM_ALLOWED_CHAT_IDS="
+    fi
+    echo
+    echo "# --- Obsidian skill (preview, not yet wired) ---"
+    if [ -n "${CFG[OBSIDIAN_VAULT_PATH]:-}" ]; then
+      echo "OBSIDIAN_VAULT_PATH=${CFG[OBSIDIAN_VAULT_PATH]}"
+    else
+      echo "# OBSIDIAN_VAULT_PATH="
+    fi
+    echo
+    # Preserve any other keys (Discord/Slack/REST/whatever the user added)
+    printed_other=0
+    for k in "${!CFG[@]}"; do
+      case "$k" in
+        OLLAMA_HOST|OLLAMA_MODEL|TELEGRAM_BOT_TOKEN|TELEGRAM_ALLOWED_CHAT_IDS|OBSIDIAN_VAULT_PATH) ;;
+        *)
+          if [ "$printed_other" = 0 ]; then
+            echo "# --- Other (preserved from previous .env) ---"
+            printed_other=1
+          fi
+          printf '%s=%s\n' "$k" "${CFG[$k]}"
+          ;;
+      esac
+    done
+  } > "$TMP_ENV"
+)
+chmod 600 "$TMP_ENV"
+mv "$TMP_ENV" "$ENV_FILE"
+
+# ---- done ---------------------------------------------------------------------
+DONE_MSG="Wrote $ENV_FILE (mode 600).
+
+Next:
+  source $VENV/bin/activate
+  set -a; . $ENV_FILE; set +a
+  cd $PROJECTS_DIR/eternal-context/skills/eternal-context
+  python -m eternalcontext"
+
 if [ -n "${CFG[TELEGRAM_BOT_TOKEN]:-}" ]; then
-  bot_label="${BOT_NAME:-your-bot}"
-  echo "Telegram channel is configured. The agent should pick up the env vars"
-  echo "and start listening on @$bot_label after launch."
+  DONE_MSG+="
+
+Telegram channel is configured. The agent should pick up TELEGRAM_BOT_TOKEN
+and start listening on @${BOT_NAME:-your-bot} after launch."
+fi
+
+if [ "$TUI" = 1 ]; then
+  whiptail --title "$WIZ_TITLE — done" --msgbox "$DONE_MSG" 20 72
+else
+  echo
+  hr
+  ok "Wizard complete"
+  hr
+  echo
+  printf '%s\n' "$DONE_MSG"
+  echo
 fi
