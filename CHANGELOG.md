@@ -6,6 +6,18 @@ All notable changes to the Mnemosyne harness deployment repo. The format is loos
 
 Work-in-progress branch. Everything below is cumulative on top of `main` (`07d2724`).
 
+### 2026-04-09 — Research-grounded upgrade: architecture doc, DeltaNet recs, GPU snapshot
+
+Committed as `3c9e1b9`. Incorporates findings from three research threads:
+
+- **Meta-Harness paper full results:** 6x gap on same benchmark, 76.4% on TB-2 with Opus (#2 leaderboard). Environment bootstrapping — the `environment-snapshot.py` pattern — confirmed as the optimizer's #1 discovery.
+- **Qwen 3.5 on Ollama:** `qwen3.5:9b` uses Gated DeltaNet + sparse MoE. Only ~3B params activated per token. DeltaNet scales linearly with context — strongest ICMS fit. Added as primary model recommendation.
+- **Mamba-3 (ICLR 2026):** 7x faster at long sequences, 4% better on LM benchmarks. The next architectural generation. Not yet on Ollama.
+
+**New:** `docs/ARCHITECTURE.md` — comprehensive system design document synthesizing all three research threads: four-layer stack, DeltaNet inflection point, model comparison matrix with architecture properties, inference-as-harness argument, observability design rationale vs Langfuse/Phoenix/OTEL, the future optimization loop.
+
+**Changed:** `environment-snapshot.py` v2 — GPU detection (nvidia-smi: model, VRAM, driver, CUDA, compute capability) + model architecture classification (heuristic: DeltaNet-hybrid vs standard-attention vs SSM). `SETUP.md` model-choice section rewritten. `BLOG.md` v3 with honest related-work section (acknowledges SuperagenticAI/metaharness and HKUDS/OpenHarness).
+
 ### 2026-04-09 — Harness observability v2: sweeps, scenarios, tests, demo
 
 Added the user-facing optimization and evaluation layer on top of the observability substrate.

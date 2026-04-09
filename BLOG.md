@@ -98,13 +98,19 @@ Step 6 (PROPOSE) — the agentic proposer that reads traces and rewrites harness
 
 The tests caught bugs I'd have shipped otherwise: a broken `--json` flag that only worked in one position, a re-run path that nuked working tokens on a network flake, and `set -e` tail-fall-through errors in the wizard.
 
-## Why local-first, zero-cloud matters
+## Related work and what's different
 
-The existing LLM observability landscape is mature (Langfuse, OpenLLMetry, Arize Phoenix, etc.). Those are monitoring platforms designed for cloud-API SaaS applications. They optimize for dashboards, cost tracking, and team collaboration via web UIs.
+[`SuperagenticAI/metaharness`](https://github.com/SuperagenticAI/metaharness) is an open-source implementation of the Meta-Harness core ideas: filesystem-backed run store, environment snapshots, and — crucially — the actual optimization loop using Codex as the proposer. It's more complete than what I built on the optimization axis. [`HKUDS/OpenHarness`](https://github.com/HKUDS/OpenHarness) from HKU is a lightweight agent framework with built-in observability via SQLite-backed memory.
 
-Mnemosyne's observability is designed for something different: **an optimization substrate readable by `grep`.** The Meta-Harness paper's proposer agent navigates the filesystem with standard terminal tools. Cloud dashboards can't be `grep`'d. OTEL spans can't be `cat`'d. JSONL files on a local filesystem can.
+The existing LLM observability landscape is also mature: Langfuse, OpenLLMetry, Arize Phoenix, TruLens — monitoring platforms for cloud-API SaaS applications.
 
-This isn't anti-cloud dogma. It's alignment with the paper's architecture: the optimizer needs raw, navigable history. Monitoring platforms compress it. We don't.
+What Mnemosyne's stack does differently is narrower and more opinionated:
+
+- **It's a deployment + observability stack for a specific local agent**, not a generic optimization framework. The wizard configures Telegram/Slack/Notion credentials. The skill helpers search Obsidian vaults and Notion workspaces. The model-choice analysis is DeltaNet-aware and ICMS-specific. These things don't generalize; they serve one agent's architecture.
+- **Zero external dependencies.** Stdlib-only Python, shellcheck-clean bash. No pip packages, no `uv`, no API keys for the tooling itself. Runs in `/tmp` with no network. This matters for a personal local-first stack that should work on an air-gapped WSL2 box.
+- **Filesystem-as-database, not SQLite.** JSONL files that can be `grep`'d, `cat`'d, and `diff`'d. The paper's proposer agent navigates the history with terminal tools. SQLite is more efficient but opaque to `grep`. We trade query performance for navigability.
+
+I'm not claiming to have built Meta-Harness. I built the substrate — the observation, evaluation, sweep, and comparison layers — that an optimizer (like `metaharness`'s Codex loop, or a future Mnemosyne-specific proposer) would run against.
 
 ## What I learned
 
@@ -139,7 +145,7 @@ Everything is on [`atxgreene/sturdy-doodle`](https://github.com/atxgreene/sturdy
 
 > 6/ The Luce megakernel fuses all 24 DeltaNet+Attention layers of Qwen 3.5-0.8B into a single CUDA kernel launch. Result: 1.55x over llama.cpp, a 2020 RTX 3090 beating an M5 Max on both speed AND efficiency. The inference runtime IS part of the harness.
 
-> 7/ Our observability is deliberately NOT Langfuse/Phoenix/OpenLLMetry. Those are monitoring platforms. We built an optimization substrate — raw JSONL traces navigable by `grep`, because the Meta-Harness paper's proposer agent reads the filesystem directly. You can't `grep` a dashboard.
+> 7/ SuperagenticAI/metaharness already exists and is MORE complete (has the actual optimizer loop). What's different here: zero-dep stdlib-only stack for a specific local agent, DeltaNet-aware model analysis, and domain-specific skill helpers (Obsidian/Notion). Different tool for a different problem.
 
 > 8/ 78 test assertions caught bugs I'd have shipped otherwise: a --json flag that only worked before the subcommand, a re-run path that nuked working tokens on network flakes, set -e tail-fall-through in the wizard. Testing is the harness for the harness.
 
