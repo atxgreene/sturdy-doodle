@@ -15,6 +15,23 @@ This repo holds **only** the bootstrap script and wizard. The two Python package
 
 `fantastic-disco` is **not** standalone — it imports and wraps `eternalcontext`. Both must be installed.
 
+### Model choice
+
+The default is `qwen3:8b`. Alternatives worth testing on your host:
+
+| Model | Size | Context | Why |
+|---|---|---|---|
+| `qwen3:8b` | ~5 GB | 32K | Current default. Solid tool use, stable. |
+| `gemma4:e4b` | ~5 GB | **128K** | Released April 2026, day-one Ollama support. 4× the context window of qwen3:8b — directly benefits ICMS retrieval. Multimodal (image input). Good candidate to A/B against qwen3:8b on your workload. |
+| `gemma4:26b` | ~18 GB | 256K | MoE with ~4B activated params. More quality but needs more RAM. |
+
+Override via env var:
+```bash
+MODEL=gemma4:e4b bash install-mnemosyne.sh
+```
+
+No recommendation to change the default until you've A/B'd on your actual workload — model quality for agent tool use is host-specific and hard to generalize.
+
 ## Prereqs
 
 - WSL2 with Ubuntu (24.04 recommended; 22.04 works but you may need `python3.11` from deadsnakes)
@@ -83,6 +100,22 @@ bash mnemosyne-wizard.sh --text
 ```
 
 The wizard auto-detects `whiptail` and uses it for a full-screen TUI when available; otherwise it falls back to plain prompts. Both paths produce the same `~/projects/mnemosyne/.env`.
+
+**Six steps:**
+
+1. **LLM backend** — Ollama host + model name, validated against a running daemon (optional; config still writes if Ollama is offline).
+2. **Telegram channel** — bot token validated via `api.telegram.org/getMe`, chat ID auto-detected via `getUpdates` and selectable from a TUI menu.
+3. **Slack channel** — bot token validated via `slack.com/api/auth.test`, optional Socket Mode app-level token + signing secret.
+4. **Obsidian skill** — vault path (consumed by `obsidian-search.py`).
+5. **Notion integration** — API key validated via `api.notion.com/v1/users/me` (consumed by `notion-search.py`).
+6. **Write** — atomic `.env` write with `umask 077`, timestamped backup of any prior version.
+
+**Re-run semantics** (these are important — they affect whether you accidentally nuke working config):
+
+- Answering **"no"** to a section's outer prompt **preserves** whatever was in `.env` for that section. It does NOT remove the existing config.
+- Answering **"yes"** then **"keep existing token"** preserves the existing credentials **without re-validating** against the live API. This means a network flake during a re-run cannot invalidate a working token.
+- Answering **"yes"** then entering a new token **does** re-validate against the live API and writes the new token only if validation succeeds.
+- To explicitly **remove** a credential, edit `.env` by hand.
 
 The wizard:
 
@@ -238,6 +271,88 @@ def obsidian_list_recent(days: int = 7, limit: int = 50) -> list[dict]:
 ```
 
 Each of these becomes a registered tool in whatever way eternal-context actually does registration (decorator, YAML manifest, registry class, etc.). Paste one existing skill from `~/projects/mnemosyne/eternal-context/skills/<something>/` and the wrapper is a 5-minute follow-up commit.
+
+## Notion skill
+
+The Notion counterpart to `obsidian-search.py`. Same three-subcommand shape, same interface-agnostic philosophy, same wrapper story — so a skill layer can treat Obsidian and Notion as interchangeable "notes surfaces."
+
+### What the helper does
+
+```bash
+# Full-text search across the workspace (pages + databases visible to the integration)
+./notion-search.py search "quarterly review"
+./notion-search.py search "project alpha" --limit 5 --json --kind page
+
+# Read a page — accepts hex ID, dashed UUID, or notion.so URL
+./notion-search.py read abcdef1234567890abcdef1234567890
+./notion-search.py read 'https://www.notion.so/My-Page-abcdef1234567890abcdef1234567890'
+
+# Pages edited in the last N days
+./notion-search.py list-recent --days 7 --json
+```
+
+Reads `NOTION_API_KEY` from the environment (the wizard writes it). Stdlib-only — uses `urllib.request` with Bearer auth. Bot tokens are **never** interpolated into URLs; all API calls go through the HTTP Authorization header.
+
+**Output formats** mirror `obsidian-search.py`:
+- `search` → `{id, object, title, url, last_edited_time}`
+- `read` → `{id, title, url, last_edited_time, markdown}` (block tree rendered to markdown-ish text)
+- `list-recent` → `{id, title, url, last_edited_time}`
+
+**Exit codes:** `0` ok, `2` usage/missing-token, `3` invalid page ID / URL escape, `4` HTTP error (auth failure, not-found), `5` network error.
+
+### Security properties (tested)
+
+- **Read-only.** No subcommand creates, updates, comments on, or deletes anything. All endpoints used are `GET` or `POST /search`.
+- **Page ID validation.** `read` requires a 32-hex-char ID (dashed or bare) or a `notion.so` URL. URLs from other hosts are rejected with exit `3`. Garbage input (`not-a-uuid`, 32 non-hex chars, empty string) is rejected before any network call. Tested against:
+  - `https://evil.com/abcdef1234567890abcdef1234567890` → **rejected** (not notion.so)
+  - `/etc/passwd`-style traversal → rejected (not a valid ID format)
+  - Empty string → rejected
+- **Bearer auth, not URL-embedded.** The token goes in the `Authorization: Bearer <token>` HTTP header, never in the URL path or query string. No `/proc/<pid>/cmdline` exposure possible because no curl process is ever spawned.
+- **Block renderer recursion limit.** `read` follows `has_children` up to depth 4 before printing `[max depth reached]`, so a pathological nesting can't exhaust memory.
+- **`--token` CLI flag exists but is discouraged.** The wizard never uses it; it's for ad-hoc testing. The env-var path is the normal flow.
+
+### Wiring into `eternal-context`
+
+Same shape as the Obsidian wrapper:
+
+```python
+import json, subprocess
+from pathlib import Path
+
+HELPER = Path("~/mnemosyne-setup/notion-search.py").expanduser()
+
+def notion_search(query: str, limit: int = 10) -> list[dict]:
+    r = subprocess.run(
+        [str(HELPER), "--json", "search", query, "--limit", str(limit)],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(r.stdout)
+
+def notion_read(page: str) -> dict:
+    r = subprocess.run(
+        [str(HELPER), "--json", "read", page],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(r.stdout)
+
+def notion_list_recent(days: int = 7, limit: int = 20) -> list[dict]:
+    r = subprocess.run(
+        [str(HELPER), "--json", "list-recent", "--days", str(days), "--limit", str(limit)],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(r.stdout)
+```
+
+The subprocess inherits `NOTION_API_KEY` from the parent process's environment (which itself loaded `.env` via `set -a; . .env; set +a`), so the skill wrapper doesn't need to handle the token.
+
+### Setup gotcha: "share with integration"
+
+When you create a Notion integration at <https://www.notion.com/my-integrations>, it gets an API key but **cannot see any of your pages** until you explicitly share them. For each page or database you want the helper to reach, open it in Notion and:
+
+- Click the `⋯` menu in the top-right
+- **Add connections** → pick your integration
+
+This applies to search too — the `/v1/search` endpoint only returns pages the integration has been shared into. The wizard reminds you of this after validation succeeds.
 
 ### Open design questions (v2, not blocking v1)
 

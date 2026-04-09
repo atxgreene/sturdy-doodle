@@ -225,6 +225,84 @@ elif action == "getUpdates":
 PY
 }
 
+# ---- Slack API helper (token via env var, Bearer auth, never argv) -----------
+# Usage: slack_api <token> <method>  -> stdout, exit 0 ok, !=0 fail
+#   auth.test   -> prints "<team> (@<user>)" on success
+slack_api() {
+  local token="$1" method="$2"
+  _SLACK_TOKEN="$token" python3 - "$method" <<'PY'
+import os, sys, json, urllib.request, urllib.error
+token = os.environ.get("_SLACK_TOKEN", "")
+if not token:
+    sys.exit(2)
+method = sys.argv[1]
+url = f"https://slack.com/api/{method}"
+req = urllib.request.Request(
+    url,
+    method="POST",
+    data=b"",
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/x-www-form-urlencoded",
+    },
+)
+try:
+    with urllib.request.urlopen(req, timeout=8) as r:
+        data = json.load(r)
+except urllib.error.HTTPError:
+    sys.exit(1)
+except (urllib.error.URLError, TimeoutError):
+    sys.exit(3)
+except Exception:
+    sys.exit(1)
+if not data.get("ok"):
+    sys.exit(1)
+if method == "auth.test":
+    team = data.get("team", "")
+    user = data.get("user", "")
+    print(f"{team} (@{user})")
+PY
+}
+
+# ---- Notion API helper (token via env var, Bearer auth, never argv) ----------
+# Usage: notion_api <token> <action>  -> stdout, exit 0 ok, !=0 fail
+#   me  -> prints the integration/bot name on success
+notion_api() {
+  local token="$1" action="$2"
+  _NOTION_TOKEN="$token" python3 - "$action" <<'PY'
+import os, sys, json, urllib.request, urllib.error
+token = os.environ.get("_NOTION_TOKEN", "")
+if not token:
+    sys.exit(2)
+action = sys.argv[1]
+if action == "me":
+    url = "https://api.notion.com/v1/users/me"
+else:
+    sys.exit(2)
+req = urllib.request.Request(
+    url,
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Notion-Version": "2022-06-28",
+    },
+)
+try:
+    with urllib.request.urlopen(req, timeout=8) as r:
+        data = json.load(r)
+except urllib.error.HTTPError:
+    sys.exit(1)
+except (urllib.error.URLError, TimeoutError):
+    sys.exit(3)
+except Exception:
+    sys.exit(1)
+if data.get("object") != "user":
+    sys.exit(1)
+if action == "me":
+    name = data.get("name") or "bot"
+    print(name)
+PY
+}
+
 # ---- Ollama reachability check ------------------------------------------------
 ollama_check() {
   local host="$1" model="$2"
@@ -267,12 +345,12 @@ else
 fi
 
 # ---- step 1: LLM backend ------------------------------------------------------
-[ "$TUI" = 0 ] && log "Step 1/4: LLM backend"
+[ "$TUI" = 0 ] && log "Step 1/6: LLM backend"
 
-OLLAMA_HOST=$(tui_input "$WIZ_TITLE — LLM backend (1/4)" \
+OLLAMA_HOST=$(tui_input "$WIZ_TITLE — LLM backend (1/6)" \
   "Ollama API base URL" "$(cur OLLAMA_HOST http://localhost:11434)")
-OLLAMA_MODEL=$(tui_input "$WIZ_TITLE — LLM backend (1/4)" \
-  "Model name" "$(cur OLLAMA_MODEL qwen3:8b)")
+OLLAMA_MODEL=$(tui_input "$WIZ_TITLE — LLM backend (1/6)" \
+  "Model name (try gemma4:e4b for 128K context)" "$(cur OLLAMA_MODEL qwen3:8b)")
 
 OLLAMA_STATUS=$(ollama_check "$OLLAMA_HOST" "$OLLAMA_MODEL" 2>/dev/null)
 OLLAMA_STATUS="${OLLAMA_STATUS:-unreachable}"
@@ -301,7 +379,7 @@ case "$OLLAMA_STATUS" in
 esac
 
 # ---- step 2: Telegram channel -------------------------------------------------
-[ "$TUI" = 0 ] && { echo; log "Step 2/4: Telegram channel"; }
+[ "$TUI" = 0 ] && { echo; log "Step 2/6: Telegram channel"; }
 
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_ALLOWED_CHAT_IDS=""
@@ -311,39 +389,45 @@ BOT_NAME=""
 TG_DEFAULT="n"
 [ -n "$(cur TELEGRAM_BOT_TOKEN)" ] && TG_DEFAULT="y"
 
-if tui_yesno "$WIZ_TITLE — Telegram (2/4)" \
+if tui_yesno "$WIZ_TITLE — Telegram (2/6)" \
   "Configure Telegram channel?
 
-(Discord, Slack, and REST channels are roadmap — wizard support coming.)" "$TG_DEFAULT"; then
+Answering 'no' keeps any existing Telegram config in .env unchanged —
+it does NOT remove it. To remove credentials, edit .env by hand." "$TG_DEFAULT"; then
 
   EXISTING_TOKEN="$(cur TELEGRAM_BOT_TOKEN)"
   KEEP=0
   if [ -n "$EXISTING_TOKEN" ]; then
     if tui_yesno "$WIZ_TITLE — Telegram" \
       "Keep existing bot token (${EXISTING_TOKEN:0:6}...)?" "y"; then
+      # Preserve both token AND chat IDs, skip live validation
+      # (network flakes shouldn't nuke a working config).
       TELEGRAM_BOT_TOKEN="$EXISTING_TOKEN"
+      TELEGRAM_ALLOWED_CHAT_IDS="$(cur TELEGRAM_ALLOWED_CHAT_IDS)"
       KEEP=1
     fi
   fi
 
   if [ "$KEEP" = 0 ]; then
-    [ "$TUI" = 1 ] && tui_msg "Telegram" "Get a token from @BotFather on Telegram (/newbot).\n\nThe next prompt is hidden — paste your bot token and press Enter." \
-                  || printf "%sGet a token from @BotFather on Telegram (/newbot).%s\n" "$c_dim" "$c_off"
-    TELEGRAM_BOT_TOKEN=$(tui_password "$WIZ_TITLE — Telegram" "Bot token (hidden):")
-  fi
-
-  if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-    tui_msg "Telegram" "No token entered — skipping Telegram setup."
-  else
-    BOT_NAME=$(tg_api "$TELEGRAM_BOT_TOKEN" getMe 2>/dev/null || true)
-
-    if [ -z "$BOT_NAME" ]; then
-      tui_msg "Telegram" "Token rejected by api.telegram.org, or network is unreachable.\n\nDouble-check the token and re-run the wizard."
-      TELEGRAM_BOT_TOKEN=""
+    if [ "$TUI" = 1 ]; then
+      tui_msg "Telegram" "Get a token from @BotFather on Telegram (/newbot).\n\nThe next prompt is hidden — paste your bot token and press Enter."
     else
-      tui_msg "Telegram" "Bot validated: @$BOT_NAME"
+      printf "%sGet a token from @BotFather on Telegram (/newbot).%s\n" "$c_dim" "$c_off"
+    fi
+    TELEGRAM_BOT_TOKEN=$(tui_password "$WIZ_TITLE — Telegram" "Bot token (hidden):")
 
-      tui_msg "Telegram — chat IDs" \
+    if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+      tui_msg "Telegram" "No token entered — skipping Telegram setup."
+    else
+      BOT_NAME=$(tg_api "$TELEGRAM_BOT_TOKEN" getMe 2>/dev/null || true)
+
+      if [ -z "$BOT_NAME" ]; then
+        tui_msg "Telegram" "Token rejected by api.telegram.org, or network is unreachable.\n\nDouble-check the token and re-run the wizard."
+        TELEGRAM_BOT_TOKEN=""
+      else
+        tui_msg "Telegram" "Bot validated: @$BOT_NAME"
+
+        tui_msg "Telegram — chat IDs" \
 "Mnemosyne only responds to chat IDs in TELEGRAM_ALLOWED_CHAT_IDS.
 
 To find your chat ID:
@@ -352,76 +436,205 @@ To find your chat ID:
 
 You can also enter chat IDs directly (comma-separated)."
 
-      CHAT_INPUT=$(tui_input "$WIZ_TITLE — Telegram chat IDs" \
-        "chat ID(s), or leave blank to scan getUpdates" "")
+        CHAT_INPUT=$(tui_input "$WIZ_TITLE — Telegram chat IDs" \
+          "chat ID(s), or leave blank to scan getUpdates" "")
 
-      if [[ "$CHAT_INPUT" =~ ^-?[0-9]+(,-?[0-9]+)*$ ]]; then
-        TELEGRAM_ALLOWED_CHAT_IDS="$CHAT_INPUT"
-      else
-        DETECTED=$(tg_api "$TELEGRAM_BOT_TOKEN" getUpdates 2>/dev/null || true)
-        if [ -n "$DETECTED" ]; then
-          if [ "$TUI" = 1 ]; then
-            # Build menu items: KEY = chat_id, label = "chat_id — name"
-            menu_args=()
-            while IFS=$'\t' read -r cid label; do
-              [ -z "$cid" ] && continue
-              menu_args+=("$cid" "$label")
-            done <<< "$DETECTED"
-            menu_args+=("MANUAL" "Type a different chat ID manually")
-            PICK=$(tui_menu "$WIZ_TITLE — Telegram chat IDs" \
-              "Recent chats that messaged @$BOT_NAME (pick one):" "${menu_args[@]}")
-            if [ "$PICK" = "MANUAL" ] || [ -z "$PICK" ]; then
-              TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
-                "Allowed chat IDs (comma-separated)" "$(cur TELEGRAM_ALLOWED_CHAT_IDS)")
+        if [[ "$CHAT_INPUT" =~ ^-?[0-9]+(,-?[0-9]+)*$ ]]; then
+          TELEGRAM_ALLOWED_CHAT_IDS="$CHAT_INPUT"
+        else
+          DETECTED=$(tg_api "$TELEGRAM_BOT_TOKEN" getUpdates 2>/dev/null || true)
+          if [ -n "$DETECTED" ]; then
+            if [ "$TUI" = 1 ]; then
+              menu_args=()
+              while IFS=$'\t' read -r cid label; do
+                [ -z "$cid" ] && continue
+                menu_args+=("$cid" "$label")
+              done <<< "$DETECTED"
+              menu_args+=("MANUAL" "Type a different chat ID manually")
+              PICK=$(tui_menu "$WIZ_TITLE — Telegram chat IDs" \
+                "Recent chats that messaged @$BOT_NAME (pick one):" "${menu_args[@]}")
+              if [ "$PICK" = "MANUAL" ] || [ -z "$PICK" ]; then
+                TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
+                  "Allowed chat IDs (comma-separated)" "$(cur TELEGRAM_ALLOWED_CHAT_IDS)")
+              else
+                TELEGRAM_ALLOWED_CHAT_IDS="$PICK"
+              fi
             else
-              TELEGRAM_ALLOWED_CHAT_IDS="$PICK"
+              echo
+              echo "  Recent chats that messaged @$BOT_NAME:"
+              printf '%s\n' "$DETECTED" | awk -F'\t' '{printf "    %s\t%s\n", $1, $2}'
+              echo
+              DEFAULT_ID=$(printf '%s' "$DETECTED" | head -1 | cut -f1)
+              TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
+                "Allowed chat IDs (comma-separated)" "$DEFAULT_ID")
             fi
           else
-            echo
-            echo "  Recent chats that messaged @$BOT_NAME:"
-            printf '%s\n' "$DETECTED" | awk -F'\t' '{printf "    %s\t%s\n", $1, $2}'
-            echo
-            DEFAULT_ID=$(printf '%s' "$DETECTED" | head -1 | cut -f1)
-            TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
-              "Allowed chat IDs (comma-separated)" "$DEFAULT_ID")
-          fi
-        else
-          tui_msg "Telegram — chat IDs" \
+            tui_msg "Telegram — chat IDs" \
 "No updates found.
 
 Message @$BOT_NAME from your Telegram client first, then re-run the wizard.
 
 You can also enter a chat ID manually on the next prompt."
-          TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
-            "chat ID(s)" "$(cur TELEGRAM_ALLOWED_CHAT_IDS)")
+            TELEGRAM_ALLOWED_CHAT_IDS=$(tui_input "$WIZ_TITLE — Telegram" \
+              "chat ID(s)" "$(cur TELEGRAM_ALLOWED_CHAT_IDS)")
+          fi
         fi
       fi
     fi
   fi
+else
+  # Outer decline — preserve any existing Telegram values unchanged
+  TELEGRAM_BOT_TOKEN="$(cur TELEGRAM_BOT_TOKEN)"
+  TELEGRAM_ALLOWED_CHAT_IDS="$(cur TELEGRAM_ALLOWED_CHAT_IDS)"
 fi
 
-# ---- step 3: Obsidian skill (preview) -----------------------------------------
-[ "$TUI" = 0 ] && { echo; log "Step 3/4: Obsidian skill (preview)"; }
+# ---- step 3: Slack channel ----------------------------------------------------
+[ "$TUI" = 0 ] && { echo; log "Step 3/6: Slack channel"; }
+
+SLACK_BOT_TOKEN=""
+SLACK_APP_TOKEN=""
+SLACK_SIGNING_SECRET=""
+SLACK_TEAM=""
+SLACK_DEFAULT="n"
+[ -n "$(cur SLACK_BOT_TOKEN)" ] && SLACK_DEFAULT="y"
+
+if tui_yesno "$WIZ_TITLE — Slack (3/6)" \
+  "Configure Slack channel?
+
+You'll need a Slack app with a Bot User (xoxb- token). Socket Mode is
+recommended in WSL — it avoids exposing an inbound webhook.
+
+Answering 'no' keeps any existing Slack config in .env unchanged." "$SLACK_DEFAULT"; then
+
+  EXISTING_SLACK_TOKEN="$(cur SLACK_BOT_TOKEN)"
+  SLACK_KEEP=0
+  if [ -n "$EXISTING_SLACK_TOKEN" ]; then
+    if tui_yesno "$WIZ_TITLE — Slack" \
+      "Keep existing bot token (${EXISTING_SLACK_TOKEN:0:6}...)?" "y"; then
+      # Preserve token + app token + signing secret, skip live validation
+      SLACK_BOT_TOKEN="$EXISTING_SLACK_TOKEN"
+      SLACK_APP_TOKEN="$(cur SLACK_APP_TOKEN)"
+      SLACK_SIGNING_SECRET="$(cur SLACK_SIGNING_SECRET)"
+      SLACK_KEEP=1
+    fi
+  fi
+
+  if [ "$SLACK_KEEP" = 0 ]; then
+    if [ "$TUI" = 1 ]; then
+      tui_msg "Slack" "Create a Slack app at https://api.slack.com/apps, add a Bot User, install to your workspace, and copy the Bot User OAuth Token (starts with xoxb-)."
+    else
+      printf "%sCreate a Slack app at https://api.slack.com/apps and copy the Bot User OAuth Token (xoxb-...).%s\n" "$c_dim" "$c_off"
+    fi
+    SLACK_BOT_TOKEN=$(tui_password "$WIZ_TITLE — Slack" "Bot token (xoxb-...):")
+
+    if [ -z "$SLACK_BOT_TOKEN" ]; then
+      tui_msg "Slack" "No token entered — skipping Slack setup."
+    else
+      SLACK_TEAM=$(slack_api "$SLACK_BOT_TOKEN" auth.test 2>/dev/null || true)
+      if [ -z "$SLACK_TEAM" ]; then
+        tui_msg "Slack" "Token rejected by slack.com/api/auth.test, or network is unreachable.\n\nDouble-check the token and re-run the wizard."
+        SLACK_BOT_TOKEN=""
+      else
+        tui_msg "Slack" "Bot validated: $SLACK_TEAM"
+
+        # Optional extras for Socket Mode / incoming webhook verification.
+        if tui_yesno "$WIZ_TITLE — Slack" \
+          "Also configure Socket Mode app-level token + signing secret?
+(Skippable — only needed if eternal-context runs Slack in Socket Mode.)" "n"; then
+          SLACK_APP_TOKEN=$(tui_password "$WIZ_TITLE — Slack" "App-level token (xapp-...):")
+          SLACK_SIGNING_SECRET=$(tui_password "$WIZ_TITLE — Slack" "Signing secret:")
+        fi
+      fi
+    fi
+  fi
+else
+  # Outer decline — preserve any existing Slack values unchanged
+  SLACK_BOT_TOKEN="$(cur SLACK_BOT_TOKEN)"
+  SLACK_APP_TOKEN="$(cur SLACK_APP_TOKEN)"
+  SLACK_SIGNING_SECRET="$(cur SLACK_SIGNING_SECRET)"
+fi
+
+# ---- step 4: Obsidian skill ---------------------------------------------------
+[ "$TUI" = 0 ] && { echo; log "Step 4/6: Obsidian skill"; }
 
 OBSIDIAN_VAULT_PATH=""
 OBS_DEFAULT="n"
 [ -n "$(cur OBSIDIAN_VAULT_PATH)" ] && OBS_DEFAULT="y"
 
-if tui_yesno "$WIZ_TITLE — Obsidian (3/4)" \
+if tui_yesno "$WIZ_TITLE — Obsidian (4/6)" \
   "Configure Obsidian vault path?
 
-The wizard will only write the path to .env. The actual Obsidian skill
-module is roadmap — see SETUP.md for the design questions." "$OBS_DEFAULT"; then
+The search/read helper ships as obsidian-search.py in this repo. The
+eternal-context skill wrapper is still a small follow-up — see
+SETUP.md#obsidian-skill.
+
+Answering 'no' keeps any existing vault path unchanged." "$OBS_DEFAULT"; then
 
   OBSIDIAN_VAULT_PATH=$(tui_input "$WIZ_TITLE — Obsidian" \
     "Vault path (absolute, accessible from this shell)" "$(cur OBSIDIAN_VAULT_PATH)")
   if [ -n "$OBSIDIAN_VAULT_PATH" ] && [ ! -d "$OBSIDIAN_VAULT_PATH" ]; then
     tui_msg "Obsidian" "Path does not exist or is not accessible:\n  $OBSIDIAN_VAULT_PATH\n\nSaving anyway — you can fix it later."
   fi
+else
+  # Outer decline — preserve any existing vault path
+  OBSIDIAN_VAULT_PATH="$(cur OBSIDIAN_VAULT_PATH)"
 fi
 
-# ---- step 4: write .env -------------------------------------------------------
-[ "$TUI" = 0 ] && { echo; log "Step 4/4: write $ENV_FILE"; }
+# ---- step 5: Notion integration -----------------------------------------------
+[ "$TUI" = 0 ] && { echo; log "Step 5/6: Notion integration"; }
+
+NOTION_API_KEY=""
+NOTION_BOT_NAME=""
+NOTION_DEFAULT="n"
+[ -n "$(cur NOTION_API_KEY)" ] && NOTION_DEFAULT="y"
+
+if tui_yesno "$WIZ_TITLE — Notion (5/6)" \
+  "Configure Notion integration?
+
+The notion-search.py helper in this repo will use this to search and
+read pages from your workspace. You must separately share individual
+pages or databases with the integration for it to access them.
+
+Answering 'no' keeps any existing Notion key unchanged." "$NOTION_DEFAULT"; then
+
+  EXISTING_NOTION="$(cur NOTION_API_KEY)"
+  NOTION_KEEP=0
+  if [ -n "$EXISTING_NOTION" ]; then
+    if tui_yesno "$WIZ_TITLE — Notion" \
+      "Keep existing API key (${EXISTING_NOTION:0:6}...)?" "y"; then
+      # Preserve, skip live validation
+      NOTION_API_KEY="$EXISTING_NOTION"
+      NOTION_KEEP=1
+    fi
+  fi
+
+  if [ "$NOTION_KEEP" = 0 ]; then
+    if [ "$TUI" = 1 ]; then
+      tui_msg "Notion" "Create an integration at https://www.notion.com/my-integrations and copy its Internal Integration Token (starts with ntn_ or secret_)."
+    else
+      printf "%sCreate an integration at https://www.notion.com/my-integrations and copy its Internal Integration Token.%s\n" "$c_dim" "$c_off"
+    fi
+    NOTION_API_KEY=$(tui_password "$WIZ_TITLE — Notion" "API key:")
+
+    if [ -z "$NOTION_API_KEY" ]; then
+      tui_msg "Notion" "No key entered — skipping Notion setup."
+    else
+      NOTION_BOT_NAME=$(notion_api "$NOTION_API_KEY" me 2>/dev/null || true)
+      if [ -z "$NOTION_BOT_NAME" ]; then
+        tui_msg "Notion" "Key rejected by api.notion.com/v1/users/me, or network is unreachable.\n\nCheck the key and re-run the wizard."
+        NOTION_API_KEY=""
+      else
+        tui_msg "Notion" "Integration validated: $NOTION_BOT_NAME\n\nDon't forget to share pages/databases with the integration\n(the Notion UI: '...' menu → 'Add connections')."
+      fi
+    fi
+  fi
+else
+  # Outer decline — preserve any existing Notion key
+  NOTION_API_KEY="$(cur NOTION_API_KEY)"
+fi
+
+# ---- step 6: write .env -------------------------------------------------------
+[ "$TUI" = 0 ] && { echo; log "Step 6/6: write $ENV_FILE"; }
 
 # Merge new values into preserved CFG (unset = drop)
 update() {
@@ -436,9 +649,13 @@ update OLLAMA_HOST "$OLLAMA_HOST"
 update OLLAMA_MODEL "$OLLAMA_MODEL"
 update TELEGRAM_BOT_TOKEN "$TELEGRAM_BOT_TOKEN"
 update TELEGRAM_ALLOWED_CHAT_IDS "$TELEGRAM_ALLOWED_CHAT_IDS"
+update SLACK_BOT_TOKEN "$SLACK_BOT_TOKEN"
+update SLACK_APP_TOKEN "$SLACK_APP_TOKEN"
+update SLACK_SIGNING_SECRET "$SLACK_SIGNING_SECRET"
 update OBSIDIAN_VAULT_PATH "$OBSIDIAN_VAULT_PATH"
+update NOTION_API_KEY "$NOTION_API_KEY"
 
-# Build preview (token masked, never raw)
+# Build preview (tokens masked, never raw)
 build_preview() {
   echo "OLLAMA_HOST=${CFG[OLLAMA_HOST]:-}"
   echo "OLLAMA_MODEL=${CFG[OLLAMA_MODEL]:-}"
@@ -446,14 +663,24 @@ build_preview() {
     echo "TELEGRAM_BOT_TOKEN=${CFG[TELEGRAM_BOT_TOKEN]:0:6}…(hidden)"
     echo "TELEGRAM_ALLOWED_CHAT_IDS=${CFG[TELEGRAM_ALLOWED_CHAT_IDS]:-}"
   fi
+  if [ -n "${CFG[SLACK_BOT_TOKEN]:-}" ]; then
+    echo "SLACK_BOT_TOKEN=${CFG[SLACK_BOT_TOKEN]:0:6}…(hidden)"
+    [ -n "${CFG[SLACK_APP_TOKEN]:-}" ] && echo "SLACK_APP_TOKEN=${CFG[SLACK_APP_TOKEN]:0:6}…(hidden)"
+    [ -n "${CFG[SLACK_SIGNING_SECRET]:-}" ] && echo "SLACK_SIGNING_SECRET=(hidden)"
+  fi
   if [ -n "${CFG[OBSIDIAN_VAULT_PATH]:-}" ]; then
     echo "OBSIDIAN_VAULT_PATH=${CFG[OBSIDIAN_VAULT_PATH]}"
+  fi
+  if [ -n "${CFG[NOTION_API_KEY]:-}" ]; then
+    echo "NOTION_API_KEY=${CFG[NOTION_API_KEY]:0:6}…(hidden)"
   fi
   # Show preserved unknown keys (count only — don't echo their values, may be secrets)
   local extra_count=0
   for k in "${!CFG[@]}"; do
     case "$k" in
-      OLLAMA_HOST|OLLAMA_MODEL|TELEGRAM_BOT_TOKEN|TELEGRAM_ALLOWED_CHAT_IDS|OBSIDIAN_VAULT_PATH) ;;
+      OLLAMA_HOST|OLLAMA_MODEL|TELEGRAM_BOT_TOKEN|TELEGRAM_ALLOWED_CHAT_IDS) ;;
+      SLACK_BOT_TOKEN|SLACK_APP_TOKEN|SLACK_SIGNING_SECRET) ;;
+      OBSIDIAN_VAULT_PATH|NOTION_API_KEY) ;;
       *) extra_count=$((extra_count+1)) ;;
     esac
   done
@@ -514,18 +741,38 @@ TMP_ENV="$ENV_FILE.tmp.$$"
       echo "# TELEGRAM_ALLOWED_CHAT_IDS="
     fi
     echo
-    echo "# --- Obsidian skill (preview, not yet wired) ---"
+    echo "# --- Slack ---"
+    if [ -n "${CFG[SLACK_BOT_TOKEN]:-}" ]; then
+      echo "SLACK_BOT_TOKEN=${CFG[SLACK_BOT_TOKEN]}"
+      [ -n "${CFG[SLACK_APP_TOKEN]:-}" ] && echo "SLACK_APP_TOKEN=${CFG[SLACK_APP_TOKEN]}"
+      [ -n "${CFG[SLACK_SIGNING_SECRET]:-}" ] && echo "SLACK_SIGNING_SECRET=${CFG[SLACK_SIGNING_SECRET]}"
+    else
+      echo "# SLACK_BOT_TOKEN="
+      echo "# SLACK_APP_TOKEN="
+      echo "# SLACK_SIGNING_SECRET="
+    fi
+    echo
+    echo "# --- Obsidian skill ---"
     if [ -n "${CFG[OBSIDIAN_VAULT_PATH]:-}" ]; then
       echo "OBSIDIAN_VAULT_PATH=${CFG[OBSIDIAN_VAULT_PATH]}"
     else
       echo "# OBSIDIAN_VAULT_PATH="
     fi
     echo
-    # Preserve any other keys (Discord/Slack/REST/whatever the user added)
+    echo "# --- Notion integration ---"
+    if [ -n "${CFG[NOTION_API_KEY]:-}" ]; then
+      echo "NOTION_API_KEY=${CFG[NOTION_API_KEY]}"
+    else
+      echo "# NOTION_API_KEY="
+    fi
+    echo
+    # Preserve any other keys (Discord/REST/whatever the user added)
     printed_other=0
     for k in "${!CFG[@]}"; do
       case "$k" in
-        OLLAMA_HOST|OLLAMA_MODEL|TELEGRAM_BOT_TOKEN|TELEGRAM_ALLOWED_CHAT_IDS|OBSIDIAN_VAULT_PATH) ;;
+        OLLAMA_HOST|OLLAMA_MODEL|TELEGRAM_BOT_TOKEN|TELEGRAM_ALLOWED_CHAT_IDS) ;;
+        SLACK_BOT_TOKEN|SLACK_APP_TOKEN|SLACK_SIGNING_SECRET) ;;
+        OBSIDIAN_VAULT_PATH|NOTION_API_KEY) ;;
         *)
           if [ "$printed_other" = 0 ]; then
             echo "# --- Other (preserved from previous .env) ---"
@@ -552,8 +799,27 @@ Next:
 if [ -n "${CFG[TELEGRAM_BOT_TOKEN]:-}" ]; then
   DONE_MSG+="
 
-Telegram channel is configured. The agent should pick up TELEGRAM_BOT_TOKEN
-and start listening on @${BOT_NAME:-your-bot} after launch."
+Telegram: configured. The agent should start listening on @${BOT_NAME:-your-bot} after launch."
+fi
+if [ -n "${CFG[SLACK_BOT_TOKEN]:-}" ]; then
+  DONE_MSG+="
+
+Slack: configured${SLACK_TEAM:+ ($SLACK_TEAM)}."
+fi
+if [ -n "${CFG[NOTION_API_KEY]:-}" ]; then
+  DONE_MSG+="
+
+Notion: configured${NOTION_BOT_NAME:+ ($NOTION_BOT_NAME)}.
+Remember to share specific pages/databases with the integration in the Notion UI
+before the agent can read them."
+fi
+if [ -n "${CFG[OBSIDIAN_VAULT_PATH]:-}" ]; then
+  DONE_MSG+="
+
+Obsidian helper usage:
+  ./obsidian-search.py search \"query\"
+  ./obsidian-search.py read path/to/note.md
+  ./obsidian-search.py list-recent --days 7"
 fi
 
 if [ "$TUI" = 1 ]; then
