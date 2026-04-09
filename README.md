@@ -2,15 +2,31 @@
 
 Reproducible bootstrap for the Mnemosyne local-agent stack on WSL2 / Ubuntu / Linux.
 
-This repo holds five small scripts:
+This repo holds nine files that together form a complete harness-deployment + observability stack for a local-first LLM agent:
+
+**Deployment layer:**
 
 | Script | Role |
 |---|---|
 | `install-mnemosyne.sh` | Unattended bootstrap. Installs Ollama, pulls a model, clones both upstream repos, builds a Python venv, smoke-tests the imports. Idempotent. |
 | `mnemosyne-wizard.sh` | Interactive post-install wizard (whiptail TUI with text fallback). Six steps: LLM backend, Telegram, Slack, Obsidian, Notion, write `~/projects/mnemosyne/.env`. |
 | `validate-mnemosyne.sh` | Health-check. Runs four checks (Ollama daemon, model present, Python imports, agent CLI loads) and exits non-zero on failure. Useful for `make check` / CI. |
-| `obsidian-search.py` | Interface-agnostic Obsidian vault helper. `search` / `read` / `list-recent` subcommands, read-only, path-traversal safe, JSON or human output. Uses ripgrep if available, pure-Python fallback otherwise. Meant to be wrapped by a thin `eternal-context` skill — see [`SETUP.md`](./SETUP.md#obsidian-skill). |
-| `notion-search.py` | Same shape as `obsidian-search.py`, backed by the Notion API. `search` / `read` / `list-recent`, read-only, Bearer-auth via `NOTION_API_KEY` env var. Stdlib-only. Meant to be wrapped by a thin skill — see [`SETUP.md`](./SETUP.md#notion-skill). |
+
+**Skill helpers** (interface-agnostic, Python stdlib only):
+
+| Script | Role |
+|---|---|
+| `obsidian-search.py` | Obsidian vault helper. `search` / `read` / `list-recent` subcommands, read-only, path-traversal safe, JSON or human output. Uses ripgrep if available, pure-Python fallback. See [`SETUP.md`](./SETUP.md#obsidian-skill). |
+| `notion-search.py` | Same shape as `obsidian-search.py`, backed by the Notion API. Read-only, Bearer-auth via `NOTION_API_KEY` env var. See [`SETUP.md`](./SETUP.md#notion-skill). |
+
+**Harness observability** (see [`SETUP.md`](./SETUP.md#harness-observability) for the architecture — inspired directly by the Stanford Meta-Harness paper, 2026):
+
+| Script | Role |
+|---|---|
+| `harness_telemetry.py` | Observability library + experiments-directory convention. `create_run` / `finalize_run` / `TelemetrySession` / `@trace` decorator. Secrets are redacted by key name at write time. Events are written raw (no summarization — deliberately; see the paper's "compressed feedback is the failure mode" argument). |
+| `mnemosyne-experiments.py` | CLI over the experiments tree. `list` / `show` / `top-k` / `pareto` / `diff` / `events` subcommands. Implements the six operations the Meta-Harness paper recommends for navigating a run history. |
+| `environment-snapshot.py` | Pre-computes `$PROJECTS_DIR` / `.env` keys / Ollama models / venv / skills / vault / disk into a single markdown preamble or JSON dict. Mirrors the Meta-Harness "Terminal-Bench 2" optimization: inject the environment into the first LLM call instead of letting the agent discover it across 2–4 exploratory turns. **Never emits `.env` values.** |
+| `test-harness.sh` | End-to-end integration test. 23 assertions covering all four observability components — run creation, event logging, secret redaction, CLI semantics (list, top-k with direction, Pareto frontier with multi-axis dominance, diff, events filtering), environment snapshot output + secret safety. Safe to run repeatedly, no network. |
 
 The two Python packages live in their own repos and are cloned by the bootstrap:
 
@@ -38,7 +54,13 @@ cd ~/projects/mnemosyne/eternal-context/skills/eternal-context
 python -m eternalcontext
 ```
 
-Full walkthrough — including channel setup, troubleshooting, and the Obsidian-skill roadmap — in [`SETUP.md`](./SETUP.md).
+Verify the observability stack is healthy (no network required, runs in a sandbox `/tmp` dir):
+
+```bash
+bash test-harness.sh     # 23 assertions across all four components
+```
+
+Full walkthrough — channel setup, the Obsidian/Notion skills, harness observability architecture, security model — in [`SETUP.md`](./SETUP.md).
 
 ## Security TL;DR
 

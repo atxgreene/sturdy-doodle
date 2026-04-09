@@ -361,6 +361,134 @@ This applies to search too — the `/v1/search` endpoint only returns pages the 
 3. **Write tools.** Deliberately out of scope for v1 — daily-note appending and link rewriting are useful but high-blast-radius. Land them as a separate `obsidian-write` skill once the read path is proven.
 4. **WSL path translation.** If the vault lives on the Windows side (e.g. `/mnt/c/Users/<you>/Documents/Obsidian`), file-watch performance over `9p` is mediocre. Acceptable for v1 (queries are point-in-time). If it becomes a problem, mirror to a WSL-native path under `~/` or poll with a longer interval.
 
+## Harness observability
+
+The four files `harness_telemetry.py`, `mnemosyne-experiments.py`, `environment-snapshot.py`, and `test-harness.sh` together form the **observability substrate** for Mnemosyne's harness. They were built after reviewing the Stanford Meta-Harness paper (Khattab et al., 2026) and are designed to be the prerequisite layer any future optimization system would run against.
+
+### Why this layer exists
+
+The Meta-Harness paper's central technical claim is that **compressed feedback is the core failure mode of prior optimizers** like DSPy and text-gradient tools: they reduce each candidate harness to a single scalar ("accuracy: 0.82") and try to improve from there, but the scalar discards the causal information an optimizer needs. Meta-Harness argues for the opposite: log **everything** — source code + raw scores + raw execution traces — to a filesystem-as-database, and let the proposer agent navigate the history with `grep` and `cat`.
+
+`harness_telemetry.py` implements that principle for Mnemosyne. It never summarizes. Each tool call is written verbatim (modulo secret redaction) to an append-only JSONL event log, keyed by run id. The `mnemosyne-experiments` CLI gives you (and any future optimizer agent) the six operations the paper recommends for navigating that history: list, show, top-k, Pareto, diff, events.
+
+### Directory layout
+
+```
+$PROJECTS_DIR/experiments/
+  latest -> run_<id>/                    symlink to most recent (best effort)
+  run_<YYYYMMDD-HHMMSS>-<slug>/
+    metadata.json                        run_id, model, status, tags, notes, git sha
+    results.json                         final metrics (written by finalize_run)
+    events.jsonl                         append-only event log, one JSON object per line
+    harness/                             optional: frozen snapshot of harness scripts
+    notes.md                             optional: free-form notes
+```
+
+Every file is plain text, grep-friendly, and can be committed to its own git repo if you want a formal history of your harness evolution.
+
+### Using the library from Python
+
+```python
+import harness_telemetry as ht
+
+run_id = ht.create_run(
+    model="gemma4:e4b",
+    tags=["baseline", "telegram-enabled"],
+    notes="first run after wizard setup",
+    freeze_files=["install-mnemosyne.sh", "mnemosyne-wizard.sh"],
+)
+
+with ht.TelemetrySession(run_id) as sess:
+    @sess.trace
+    def obsidian_search(query, limit=10):
+        # ... real implementation (or subprocess to obsidian-search.py) ...
+        return {"matches": [...]}
+
+    obsidian_search("project alpha")
+    obsidian_search("quarterly review", limit=5)
+
+    # Or log events manually for prompts, responses, state changes
+    sess.log("prompt", args={"prompt": "What did I work on yesterday?"})
+    sess.log("response", result={"text": "Based on Obsidian notes, ..."})
+
+ht.finalize_run(run_id, metrics={
+    "accuracy": 0.82,
+    "latency_ms_avg": 1250.5,
+    "turns_successful": 34,
+    "turns_failed": 2,
+})
+```
+
+### Navigating run history with the CLI
+
+```bash
+# All runs, most recent first
+mnemosyne-experiments.py list
+
+# Filter by tag or status
+mnemosyne-experiments.py list --tag baseline --status completed
+
+# Inspect one run
+mnemosyne-experiments.py show run_20260409-053012-baseline
+
+# Top 5 runs by any numeric metric
+mnemosyne-experiments.py top-k 5 --metric accuracy --direction max
+mnemosyne-experiments.py top-k 5 --metric latency_ms_avg --direction min
+
+# Pareto frontier on multiple axes at once
+#   (which runs are not strictly dominated by any other?)
+mnemosyne-experiments.py pareto \
+  --axes accuracy,latency_ms_avg \
+  --directions max,min
+
+# Diff two runs: metadata, metrics, harness code (if frozen)
+mnemosyne-experiments.py diff run_20260409-053012-baseline run_20260409-053200-gemma4ab
+
+# Read a run's event stream, filterable by type/tool/status
+mnemosyne-experiments.py events run_20260409-053012-baseline --tool obsidian_search
+mnemosyne-experiments.py events run_20260409-053012-baseline --event-type tool_call
+
+# Machine-readable JSON mode works on every subcommand
+mnemosyne-experiments.py list --json | jq '.[].run_id'
+mnemosyne-experiments.py pareto --json --axes accuracy,latency_ms_avg --directions max,min
+```
+
+### Environment snapshot (the Terminal-Bench 2 pattern)
+
+The Meta-Harness paper's most striking concrete result was on Terminal-Bench 2: the proposer agent discovered that instead of letting the LLM spend 2–4 turns exploring its environment via tool calls (`pwd`, `ls /app`, `which python`, etc.), you could **pre-compute a snapshot and inject it into the first LLM call**, eliminating the exploration phase entirely.
+
+`environment-snapshot.py` implements that pattern for Mnemosyne:
+
+```bash
+./environment-snapshot.py              # human-readable markdown preamble
+./environment-snapshot.py --json       # machine-readable dict
+```
+
+It snapshots the projects directory layout, the keys configured in `.env` (**names only — never values**), Ollama reachability and model list, venv health, available skills, Obsidian vault status (path + note count), disk free, and platform info. A skill wrapper can inject the markdown as a system prompt preamble, eliminating the agent's need to run discovery tool calls on every cold start.
+
+### Security properties (all tested by `test-harness.sh`)
+
+- **Secrets are redacted by key name** at event-write time. The default pattern list covers `token`, `secret`, `api_key`, `password`, `bearer`, `credential`, `signing_key` (case-insensitive substring). Verified in the integration test: a deliberately-planted secret is never present in any `events.jsonl` file, and the `<redacted>` marker IS present where expected.
+- **Environment snapshot never emits `.env` values.** Only the key names cross the boundary. Verified in the integration test against a `.env` pre-seeded with fake token values that must not appear in either markdown or JSON output.
+- **No summarization.** Every tool call is written raw. The paper's "compressed feedback loses information" claim is respected deliberately.
+- **Read-only.** No subcommand modifies anything in `eternal-context` or `fantastic-disco`. The observability layer is purely additive — turn it off and the agent still works.
+- **No network dependencies** for the integration test. `test-harness.sh` runs in a `/tmp` scratch dir, exercises all four components, and exits non-zero on any failure. Safe to wire into CI.
+
+### What this does NOT do
+
+- **No optimizer agent.** The paper runs Claude Code as the agentic proposer in a loop, reading and rewriting harness code. This repo ships the substrate the optimizer runs *against*, not the optimizer itself. That's its own project.
+- **No auto-eval suite.** You'd need to pick ~50 realistic scenarios to score against. The `finalize_run` API accepts any metrics dict — bring your own evaluator.
+- **No runtime modification of `eternal-context` or `fantastic-disco`.** The harness deployment layer is still the responsibility of `install-mnemosyne.sh` and `mnemosyne-wizard.sh`. Observability is a separate layer that sits alongside, not inside.
+
+### Running the integration test
+
+```bash
+bash test-harness.sh          # 23 assertions, exits 0 on success
+bash test-harness.sh --keep   # leave the fake PROJECTS_DIR in /tmp for inspection
+```
+
+The test creates three fake runs with deliberately diverse metrics (one baseline, one faster-but-less-accurate, one dominated), exercises every CLI subcommand, verifies secret redaction at the filesystem level, runs the environment snapshot twice (markdown and JSON), and asserts that no planted secret ever escapes into any output.
+
 ## Security model
 
 **What gets stored where:**
