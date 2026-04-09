@@ -17,20 +17,34 @@ This repo holds **only** the bootstrap script and wizard. The two Python package
 
 ### Model choice
 
-The default is `qwen3:8b`. Alternatives worth testing on your host:
+The default is `qwen3:8b`. The landscape shifted significantly in April 2026: Qwen 3.5 introduced DeltaNet hybrid attention (scales linearly with context), and Gemma 4 brought 128K context to the ~5GB weight class. Both are available on Ollama today.
 
-| Model | Size | Context | Why |
-|---|---|---|---|
-| `qwen3:8b` | ~5 GB | 32K | Current default. Solid tool use, stable. |
-| `gemma4:e4b` | ~5 GB | **128K** | Released April 2026, day-one Ollama support. 4× the context window of qwen3:8b — directly benefits ICMS retrieval. Multimodal (image input). Good candidate to A/B against qwen3:8b on your workload. |
-| `gemma4:26b` | ~18 GB | 256K | MoE with ~4B activated params. More quality but needs more RAM. |
+| Model | Architecture | Context | Active params | Ollama tag | Why for Mnemosyne |
+|---|---|---|---|---|---|
+| `qwen3:8b` | Standard attention | 32K | 8B dense | `qwen3:8b` | Current default. Solid tool use. 32K limits ICMS L1. |
+| **`qwen3.5:9b`** | **DeltaNet + MoE** | **Linear** | **~3B activated** | `qwen3.5:9b` | **Strongest candidate.** Same Qwen family (tool-calling compatibility). DeltaNet scales linearly with context — critical for ICMS. Sparse MoE means faster per-token inference than dense 8B despite larger total params. |
+| `gemma4:e4b` | Standard attention | 128K | ~4.5B eff | `gemma4:e4b` | Big context via brute-force. 4× qwen3's window. Multimodal (image input). But quadratic scaling means it slows at the 128K ceiling. |
+| `gemma4:26b` | MoE | 256K | ~4B activated | `gemma4:26b` | Max context. Needs ~16 GB VRAM. Quality upgrade if you have the hardware. |
+| (future) Mamba-3 | SSM hybrid | Very long | Varies | Not on Ollama yet | Beats transformers by 4% while running 7x faster at long sequences (ICLR 2026). The next generation of linear-attention models. |
 
-Override via env var:
+**Why DeltaNet matters for ICMS:** Standard attention computes an O(n^2) matrix over the context window. At 32K tokens that's manageable; at 128K it's expensive; at 256K it dominates inference time. DeltaNet replaces this with a fixed-size recurrent state that processes tokens in O(n). For Mnemosyne's three-tier memory (L1 hot / L2 warm / L3 cold), linear scaling means the model can look at MORE retrieved context per turn without the latency penalty. That's the architectural argument for `qwen3.5:9b` over `gemma4:e4b` — not benchmarks, but scaling properties that matter for YOUR specific workload pattern.
+
+**The Luce megakernel** (April 2026) demonstrated that fusing all DeltaNet+Attention layers into a single CUDA kernel delivers 1.55x over stock llama.cpp on the same GPU. This means the inference gap will widen further in DeltaNet's favor as kernel support matures. See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full analysis.
+
+**Recommendation:** Start with `qwen3.5:9b`. If tool-calling behavior degrades (Qwen 3.5 is newer, may have quirks), fall back to `qwen3:8b`. Use `gemma4:e4b` as a comparison point. The sweep infrastructure can A/B all three:
+
 ```bash
+# Try Qwen 3.5
+MODEL=qwen3.5:9b bash install-mnemosyne.sh
+
+# Or Gemma 4
 MODEL=gemma4:e4b bash install-mnemosyne.sh
+
+# A/B with the sweep demo (no real LLM needed, but shows the workflow)
+python3 examples/sweep_demo.py
 ```
 
-No recommendation to change the default until you've A/B'd on your actual workload — model quality for agent tool use is host-specific and hard to generalize.
+See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full model architecture analysis, including Mamba-3 (ICLR 2026) and the research backing these recommendations.
 
 ## Prereqs
 

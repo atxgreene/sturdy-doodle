@@ -217,15 +217,103 @@ def snapshot_platform() -> dict[str, Any]:
     }
 
 
+def snapshot_gpu() -> dict[str, Any]:
+    """Detect NVIDIA GPU via nvidia-smi. Returns model, VRAM, driver, CUDA version.
+
+    This matters for DeltaNet inference: the Luce megakernel showed that
+    fused CUDA kernels for hybrid DeltaNet+Attention models can extract
+    1.55x more throughput from the same GPU. Knowing the GPU capabilities
+    at snapshot time lets the agent (or a Meta-Harness optimizer) reason
+    about whether to use a DeltaNet-native model (Qwen 3.5) vs standard
+    attention (qwen3, Gemma 4).
+    """
+    # Try nvidia-smi for NVIDIA GPUs
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total,driver_version",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            parts = out.stdout.strip().split(", ")
+            gpu_info: dict[str, Any] = {
+                "detected": True,
+                "vendor": "nvidia",
+                "model": parts[0] if len(parts) > 0 else "unknown",
+                "vram_mb": int(parts[1]) if len(parts) > 1 and parts[1].strip().isdigit() else None,
+                "driver": parts[2].strip() if len(parts) > 2 else "unknown",
+            }
+            # Get CUDA version separately
+            cuda_out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if cuda_out.returncode == 0:
+                gpu_info["compute_capability"] = cuda_out.stdout.strip()
+            # Check CUDA toolkit version
+            nvcc = subprocess.run(
+                ["nvcc", "--version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if nvcc.returncode == 0:
+                import re
+                m = re.search(r"release (\d+\.\d+)", nvcc.stdout)
+                if m:
+                    gpu_info["cuda_toolkit"] = m.group(1)
+            return gpu_info
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # No GPU detected
+    return {"detected": False}
+
+
+def snapshot_model_architecture(ollama_snap: dict[str, Any]) -> dict[str, Any]:
+    """Classify available models by architecture family.
+
+    This is useful for harness optimization: DeltaNet-native models
+    (Qwen 3.5) scale linearly with context and benefit from fused
+    kernels, while standard-attention models (Gemma 4, qwen3) scale
+    quadratically but have more mature kernel support.
+    """
+    models = ollama_snap.get("models", [])
+    if not models:
+        return {"available": []}
+
+    # Classification heuristics based on model family names.
+    # NOT authoritative — the real architecture is in the model's config.
+    classifications: list[dict[str, str]] = []
+    for name in models:
+        lower = name.lower()
+        arch = "unknown"
+        if "qwen3.5" in lower:
+            arch = "hybrid-deltanet-moe"
+        elif "qwen3" in lower and "3.5" not in lower:
+            arch = "standard-attention"
+        elif "gemma4" in lower or "gemma-4" in lower:
+            arch = "standard-attention"  # Gemma 4 uses standard MHA + MoE
+        elif "mamba" in lower:
+            arch = "ssm"
+        elif "llama" in lower:
+            arch = "standard-attention"
+        elif "phi" in lower:
+            arch = "standard-attention"
+        classifications.append({"model": name, "architecture": arch})
+    return {"available": classifications}
+
+
 # ---- aggregate ---------------------------------------------------------------
 
 def build_snapshot(projects_dir: Path | None = None) -> dict[str, Any]:
     pd = projects_dir or default_projects_dir()
+    ollama_snap = snapshot_ollama()
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "projects_dir": snapshot_projects_dir(pd),
         "env_file": snapshot_env_file(pd),
-        "ollama": snapshot_ollama(),
+        "ollama": ollama_snap,
+        "model_architectures": snapshot_model_architecture(ollama_snap),
+        "gpu": snapshot_gpu(),
         "venv": snapshot_venv(pd),
         "skills": snapshot_skills(),
         "vault": snapshot_vault(pd),
@@ -274,6 +362,37 @@ def format_markdown(snap: dict[str, Any]) -> str:
     else:
         lines.append(_fmt_section("Ollama",
                                   f"NOT reachable at {ollama['host']} ({ollama.get('error', '?')})"))
+    lines.append("")
+
+    # Model architectures (if Ollama was reachable)
+    archs = snap.get("model_architectures", {}).get("available", [])
+    if archs:
+        lines.append(_fmt_section("Model architectures", ""))
+        for entry in archs:
+            arch_label = entry["architecture"]
+            if arch_label == "hybrid-deltanet-moe":
+                arch_label += " (linear attention, scales linearly with context)"
+            elif arch_label == "standard-attention":
+                arch_label += " (quadratic with context length)"
+            elif arch_label == "ssm":
+                arch_label += " (state-space model, linear scaling)"
+            lines.append(f"  {entry['model']}: {arch_label}")
+        lines.append("")
+
+    # GPU
+    gpu = snap.get("gpu", {})
+    if gpu.get("detected"):
+        vram = f"{gpu['vram_mb']} MB" if gpu.get("vram_mb") else "unknown"
+        cuda = gpu.get("cuda_toolkit") or "unknown"
+        cc = gpu.get("compute_capability") or "unknown"
+        lines.append(_fmt_section("GPU",
+                                  f"{gpu['model']} ({vram} VRAM, driver {gpu.get('driver', '?')})"))
+        lines.append(f"  CUDA toolkit: {cuda}, compute capability: {cc}")
+        # DeltaNet kernel eligibility hint
+        if gpu.get("vram_mb") and gpu["vram_mb"] >= 1500:
+            lines.append("  DeltaNet fused kernels: eligible (Ampere+ with sufficient VRAM)")
+    else:
+        lines.append(_fmt_section("GPU", "none detected (CPU inference)"))
     lines.append("")
 
     venv = snap["venv"]
