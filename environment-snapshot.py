@@ -50,10 +50,14 @@ from typing import Any
 # ---- defaults ----------------------------------------------------------------
 
 def default_projects_dir() -> Path:
-    raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    return (Path.home() / "projects" / "mnemosyne").resolve()
+    try:
+        from mnemosyne_config import default_projects_dir as _dpd
+        return _dpd()
+    except ImportError:
+        raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return (Path.home() / "projects" / "mnemosyne").resolve()
 
 
 # ---- snapshot fragments ------------------------------------------------------
