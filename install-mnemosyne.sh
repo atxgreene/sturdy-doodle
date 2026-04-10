@@ -10,28 +10,45 @@
 #    3. Pulls the local model (default: qwen3:8b)
 #    4. Clones eternal-context (base agent) and fantastic-disco (extensions)
 #       into ~/projects/mnemosyne/
+#    4b. Patches fantastic-disco/pyproject.toml build-backend (upstream bug)
 #    5. Creates a Python venv at ~/projects/mnemosyne/.venv
+#    5b. Writes eternalcontext.pth EARLY + on EXIT (self-heals partial runs)
+#    5c. Optionally installs CPU-only torch (CPU_TORCH=1)
 #    6. Installs eternal-context requirements + fantastic-disco as editable
-#    7. Prints next steps for running the agent
+#    7. Smoke-tests both imports, prints next steps
 #
 #  This script does NOT touch OpenClaw or any existing workspace.
 #
 #  Usage:
-#    bash install-mnemosyne.sh                # default: qwen3:8b model
-#    MODEL=llama3.1:8b bash install-mnemosyne.sh   # override model
-#    PROJECTS_DIR=$HOME/code bash install-mnemosyne.sh  # override location
+#    bash install-mnemosyne.sh                       # default: qwen3:8b model
+#    MODEL=llama3.1:8b bash install-mnemosyne.sh     # override model
+#    PROJECTS_DIR=$HOME/code bash install-mnemosyne.sh   # override location
+#    CPU_TORCH=1 bash install-mnemosyne.sh           # force CPU-only torch wheels
+#                                                    # (~200MB vs ~2GB CUDA)
+#
+#  All config is via env vars (no CLI flags):
+#    PROJECTS_DIR        install root (default: $HOME/projects/mnemosyne)
+#    MODEL               Ollama model (default: qwen3:8b)
+#    CPU_TORCH=1         install CPU-only torch wheels
+#    ETERNAL_REPO        eternal-context git URL (override for forks)
+#    FANTASTIC_REPO      fantastic-disco git URL (override for forks)
+#    FANTASTIC_BRANCH    fantastic-disco branch to track
 # ==============================================================================
 
 set -euo pipefail
+
+# Resolve where this script lives so we can point at sibling files (wizard).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---- Config (override via env vars) ------------------------------------------
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects/mnemosyne}"
 MODEL="${MODEL:-qwen3:8b}"
 PY_MIN_MAJOR=3
 PY_MIN_MINOR=11
-ETERNAL_REPO="https://github.com/atxgreene/eternal-context.git"
-FANTASTIC_REPO="https://github.com/atxgreene/fantastic-disco.git"
-FANTASTIC_BRANCH="claude/review-mnemosyne-agent-5bb7m"
+ETERNAL_REPO="${ETERNAL_REPO:-https://github.com/atxgreene/eternal-context.git}"
+FANTASTIC_REPO="${FANTASTIC_REPO:-https://github.com/atxgreene/fantastic-disco.git}"
+FANTASTIC_BRANCH="${FANTASTIC_BRANCH:-claude/review-mnemosyne-agent-5bb7m}"
+CPU_TORCH="${CPU_TORCH:-0}"
 
 # ---- Pretty output ------------------------------------------------------------
 c_blue=$'\033[1;34m'; c_green=$'\033[1;32m'; c_yellow=$'\033[1;33m'; c_red=$'\033[1;31m'; c_off=$'\033[0m'
@@ -111,6 +128,19 @@ clone_or_pull() {
 clone_or_pull "$ETERNAL_REPO"   "$PROJECTS_DIR/eternal-context"
 clone_or_pull "$FANTASTIC_REPO" "$PROJECTS_DIR/fantastic-disco" "$FANTASTIC_BRANCH"
 
+# ---- Step 4b: patch fantastic-disco pyproject.toml ---------------------------
+# Upstream bug: build-backend points at setuptools.backends._legacy:_Backend,
+# which doesn't exist and makes `pip install -e .` fail at the build-system
+# resolution step. Rewrite to the real entrypoint BEFORE pip ever sees it.
+# Idempotent: re-running after the fix is a no-op.
+DISCO_PYPROJECT="$PROJECTS_DIR/fantastic-disco/pyproject.toml"
+if [ -f "$DISCO_PYPROJECT" ] && grep -q 'setuptools\.backends\._legacy:_Backend' "$DISCO_PYPROJECT"; then
+  warn "Patching fantastic-disco/pyproject.toml build-backend (upstream bug)"
+  cp "$DISCO_PYPROJECT" "$DISCO_PYPROJECT.bak"
+  sed -i 's|setuptools\.backends\._legacy:_Backend|setuptools.build_meta|' "$DISCO_PYPROJECT"
+  ok "build-backend patched -> setuptools.build_meta"
+fi
+
 # ---- Step 5: Python venv -----------------------------------------------------
 VENV="$PROJECTS_DIR/.venv"
 log "Creating Python venv at $VENV"
@@ -126,7 +156,35 @@ fi
 source "$VENV/bin/activate"
 ok "venv active: $(python --version)"
 
+# ---- Step 5b: link eternalcontext into venv (EARLY + idempotent) -------------
+# The eternalcontext package lives at eternal-context/skills/eternal-context,
+# not at the repo root, so `import eternalcontext` only works if a .pth file
+# in site-packages points there. Write it BEFORE any pip install so a mid-run
+# pip crash still leaves a working import path on retry, and re-write on EXIT
+# so partial-failure re-runs always self-heal.
+write_eternal_pth() {
+  local site_packages pth
+  site_packages=$(python -c 'import site; print(site.getsitepackages()[0])' 2>/dev/null) || return 0
+  [ -n "$site_packages" ] && [ -d "$site_packages" ] || return 0
+  pth="$site_packages/eternalcontext.pth"
+  printf '%s\n' "$PROJECTS_DIR/eternal-context/skills/eternal-context" > "$pth"
+}
+write_eternal_pth
+ok "Linked eternalcontext into venv (will re-link on exit)"
+trap 'write_eternal_pth || true' EXIT
+
 python -m pip install --upgrade pip wheel setuptools
+
+# ---- Step 5c: optional CPU-only torch ----------------------------------------
+# CUDA torch wheels are ~2GB; for CPU-only hosts (or if you don't want the
+# CUDA download) set CPU_TORCH=1. We install torch from the cpu index BEFORE
+# the eternal-context requirements so pip sees it as already-satisfied and
+# won't re-resolve to the default index.
+if [ "$CPU_TORCH" = "1" ]; then
+  warn "CPU_TORCH=1 — installing CPU-only torch wheels (skipping CUDA download)"
+  pip install --index-url https://download.pytorch.org/whl/cpu torch
+  ok "CPU-only torch installed"
+fi
 
 # ---- Step 6: install both packages -------------------------------------------
 log "Installing eternal-context dependencies"
@@ -134,11 +192,6 @@ pip install -r "$PROJECTS_DIR/eternal-context/skills/eternal-context/requirement
 
 log "Installing fantastic-disco (consciousness extensions) in editable mode"
 pip install -e "$PROJECTS_DIR/fantastic-disco[dev]"
-
-# Make eternalcontext importable from anywhere by adding the skill dir to a .pth
-SITE_PACKAGES=$(python -c 'import site; print(site.getsitepackages()[0])')
-echo "$PROJECTS_DIR/eternal-context/skills/eternal-context" > "$SITE_PACKAGES/eternalcontext.pth"
-ok "Linked eternalcontext into venv"
 
 # ---- Step 7: smoke test ------------------------------------------------------
 log "Smoke test: importing both packages"
@@ -169,15 +222,16 @@ Local model:  $MODEL  (Ollama on http://127.0.0.1:11434)
 Next steps:
   source $VENV/bin/activate
 
-  # CLI REPL (base agent)
+  # 1. Configure Telegram (and Obsidian path) interactively:
+  bash $SCRIPT_DIR/mnemosyne-wizard.sh
+
+  # 2. Load the .env the wizard wrote and boot the base agent:
+  set -a; . $PROJECTS_DIR/.env; set +a
   cd $PROJECTS_DIR/eternal-context/skills/eternal-context
   python -m eternalcontext
 
-  # Multi-channel server (Telegram/Discord/Slack/REST) — needs env vars first
+  # Multi-channel server (Telegram/Discord/Slack/REST) — needs the env loaded above
   python -m eternalcontext.server
-
-  # Run the fantastic-disco dashboard (if it has one)
-  cd $PROJECTS_DIR/fantastic-disco/dashboard && ls
 
   # Tests for the consciousness extensions
   cd $PROJECTS_DIR/fantastic-disco && pytest mnemosyne/tests/ -v

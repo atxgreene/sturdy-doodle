@@ -1,0 +1,32 @@
+# Never commit secrets
+.env
+.env.*
+!.env.example
+*.bak.*
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.eggs/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Project-specific scratch (don't commit local clones)
+projects/
+mnemosyne-setup-local/
