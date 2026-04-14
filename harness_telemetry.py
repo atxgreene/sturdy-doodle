@@ -128,11 +128,21 @@ def _utcnow_iso() -> str:
 
 
 def default_projects_dir() -> Path:
-    """Resolve $MNEMOSYNE_PROJECTS_DIR or ~/projects/mnemosyne."""
-    raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    return (Path.home() / "projects" / "mnemosyne").resolve()
+    """Resolve $MNEMOSYNE_PROJECTS_DIR or ~/projects/mnemosyne.
+
+    Re-exported from mnemosyne_config for backward compat — code that
+    already does `from harness_telemetry import default_projects_dir` keeps
+    working. New code should import from mnemosyne_config directly.
+    """
+    try:
+        from mnemosyne_config import default_projects_dir as _dpd
+        return _dpd()
+    except ImportError:
+        # Fallback if mnemosyne_config not on path (e.g. standalone use)
+        raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return (Path.home() / "projects" / "mnemosyne").resolve()
 
 
 def _experiments_root(projects_dir: Path | None = None) -> Path:

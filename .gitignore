@@ -30,3 +30,5 @@ venv/
 # Project-specific scratch (don't commit local clones)
 projects/
 mnemosyne-setup-local/
+build/
+dist/

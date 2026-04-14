@@ -220,7 +220,7 @@ rm -f /tmp/harness-needle.txt
 log "3/4  mnemosyne-experiments: list, show, top-k, pareto, diff, events"
 
 export MNEMOSYNE_PROJECTS_DIR="$FAKE"
-MEX="$SCRIPT_DIR/mnemosyne-experiments.py"
+MEX="$SCRIPT_DIR/mnemosyne_experiments.py"
 
 # list
 if python3 "$MEX" list 2>/dev/null | grep -q "run_"; then
@@ -352,7 +352,7 @@ fi
 # ---- 4. environment-snapshot -------------------------------------------------
 log "4/4  environment-snapshot: markdown + JSON + secret safety"
 
-SNAP="$SCRIPT_DIR/environment-snapshot.py"
+SNAP="$SCRIPT_DIR/environment_snapshot.py"
 
 # Pre-seed a .env with a bot token we'll assert is NEVER emitted
 cat > "$FAKE/.env" <<'INNER_ENV'

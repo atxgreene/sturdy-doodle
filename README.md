@@ -2,7 +2,7 @@
 
 Reproducible bootstrap for the Mnemosyne local-agent stack on WSL2 / Ubuntu / Linux.
 
-This repo holds nine files that together form a complete harness-deployment + observability stack for a local-first LLM agent:
+This repo is a **`pip install -e .`-able Python package** that wraps the Mnemosyne agent stack with a full harness-deployment + observability + evaluation suite. Zero runtime dependencies beyond the Python stdlib. Six console commands, nine library modules, plus shell scripts for bootstrap and wizard flows.
 
 **Deployment layer:**
 
@@ -40,9 +40,20 @@ Override either repo URL via `ETERNAL_REPO=` / `FANTASTIC_REPO=` / `FANTASTIC_BR
 ```bash
 git clone https://github.com/atxgreene/sturdy-doodle.git ~/mnemosyne-setup
 cd ~/mnemosyne-setup
-bash install-mnemosyne.sh        # ~10 min on a fresh box, mostly the model pull
-bash mnemosyne-wizard.sh         # configure Telegram + Obsidian path
+bash install-mnemosyne.sh        # clones + builds venv + pip install -e . of this repo
+bash mnemosyne-wizard.sh         # configure Telegram / Slack / Obsidian / Notion
 bash validate-mnemosyne.sh       # confirm everything's healthy
+```
+
+After the install, these commands are on `$PATH` inside the venv:
+
+```
+mnemosyne-experiments   # list / show / top-k / pareto / diff / events / aggregate
+mnemosyne-pipeline      # observe → evaluate → sweep → compare → inspect in one shot
+environment-snapshot    # first-turn environment preamble (markdown or --json)
+obsidian-search         # search / read / list-recent against your vault
+notion-search           # same shape, backed by the Notion API
+harness-telemetry       # library smoke test
 ```
 
 Then boot the agent:
@@ -57,7 +68,8 @@ python -m eternalcontext
 Verify the observability stack is healthy (no network required, runs in a sandbox `/tmp` dir):
 
 ```bash
-bash test-harness.sh     # 23 assertions across all four components
+bash test-harness.sh           # 29 integration assertions
+python3 tests/test_all.py      # 49 unit tests (1 second)
 ```
 
 Full walkthrough — channel setup, the Obsidian/Notion skills, harness observability architecture, security model — in [`SETUP.md`](./SETUP.md).

@@ -31,13 +31,18 @@ import sys
 import time
 from pathlib import Path
 
-# Make the sibling modules importable regardless of cwd
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE.parent))
-
-import harness_sweep as sweep  # noqa: E402
-import harness_telemetry as ht  # noqa: E402
-import scenario_runner as sr  # noqa: E402
+# After `pip install -e .` these are plain imports. Fallback for an
+# un-installed clone keeps the demo standalone.
+try:
+    import harness_sweep as sweep
+    import harness_telemetry as ht
+    import scenario_runner as sr
+except ImportError:
+    sys.path.insert(0, str(_HERE.parent))
+    import harness_sweep as sweep  # noqa: E402
+    import harness_telemetry as ht  # noqa: E402
+    import scenario_runner as sr  # noqa: E402
 
 SCENARIOS_FILE = _HERE.parent / "scenarios.example.jsonl"
 

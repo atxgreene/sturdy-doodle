@@ -50,10 +50,14 @@ from typing import Any
 # ---- defaults ----------------------------------------------------------------
 
 def default_projects_dir() -> Path:
-    raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    return (Path.home() / "projects" / "mnemosyne").resolve()
+    try:
+        from mnemosyne_config import default_projects_dir as _dpd
+        return _dpd()
+    except ImportError:
+        raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return (Path.home() / "projects" / "mnemosyne").resolve()
 
 
 # ---- snapshot fragments ------------------------------------------------------
@@ -131,24 +135,41 @@ def snapshot_venv(pd: Path) -> dict[str, Any]:
 
 
 def snapshot_skills() -> dict[str, Any]:
-    """Discover skill helper scripts installed alongside this script."""
+    """Discover skill helper scripts installed alongside this script.
+
+    Two discovery paths:
+      1. Installed entry points (post `pip install -e .`): check $PATH
+         for the hyphenated commands declared in pyproject.toml.
+      2. Filesystem siblings (clone-mode): scan for *_search.py and
+         *_snapshot.py next to this file. Also accepts the legacy
+         hyphenated names for backward compat.
+    """
+    import shutil as _shutil
+
     script_dir = Path(__file__).parent.resolve()
-    skills: list[str] = []
+    skills: set[str] = set()
 
-    # Known-pattern helpers
-    for name in ("obsidian-search.py", "notion-search.py"):
-        if (script_dir / name).is_file():
-            skills.append(name.removesuffix(".py"))
+    # Names are reported in the user-facing, hyphenated form so they match
+    # what the user actually types at the shell after `pip install -e .`.
 
-    # Generic pattern: anything ending in -search.py or -snapshot.py
-    for p in sorted(script_dir.glob("*-search.py")):
-        stem = p.stem
-        if stem not in skills:
-            skills.append(stem)
-    for p in sorted(script_dir.glob("*-snapshot.py")):
-        stem = p.stem
-        if stem not in skills and stem != Path(__file__).stem:
-            skills.append(stem)
+    # Path 1: installed entry points on $PATH
+    for cmd in ("obsidian-search", "notion-search"):
+        if _shutil.which(cmd):
+            skills.add(cmd)
+
+    # Path 2: sibling .py files (both new underscore and legacy hyphen names)
+    for root in ("obsidian", "notion"):
+        for suffix in ("_search.py", "-search.py"):
+            if (script_dir / f"{root}{suffix}").is_file():
+                skills.add(f"{root}-search")
+
+    # Generic pattern: anything matching *_search.py / *_snapshot.py and their
+    # hyphenated legacy equivalents. Normalize to the hyphenated public form.
+    for pattern in ("*_search.py", "*_snapshot.py", "*-search.py", "*-snapshot.py"):
+        for p in script_dir.glob(pattern):
+            stem = p.stem.replace("_", "-")
+            if stem != Path(__file__).stem.replace("_", "-") and not stem.startswith("environment"):
+                skills.add(stem)
 
     return {"available": sorted(skills), "script_dir": str(script_dir)}
 

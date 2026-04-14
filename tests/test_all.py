@@ -15,7 +15,6 @@ this file focuses on pure-Python unit tests of the library internals.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import shutil
@@ -32,22 +31,8 @@ sys.path.insert(0, str(_REPO))
 
 import harness_sweep as sweep  # noqa: E402
 import harness_telemetry as ht  # noqa: E402
+import mnemosyne_experiments as mex  # noqa: E402  (direct import after rename)
 import scenario_runner as sr  # noqa: E402
-
-
-# Import the hyphenated CLI module via importlib so we can unit-test its
-# internal helpers (_dominates, _percentile, _ascii_scatter).
-def _load_mnemo_experiments():
-    spec = importlib.util.spec_from_file_location(
-        "mnemosyne_experiments",
-        _REPO / "mnemosyne-experiments.py",
-    )
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
-
-
-mex = _load_mnemo_experiments()
 
 
 # ---- test harness ------------------------------------------------------------

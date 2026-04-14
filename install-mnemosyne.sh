@@ -193,6 +193,20 @@ pip install -r "$PROJECTS_DIR/eternal-context/skills/eternal-context/requirement
 log "Installing fantastic-disco (consciousness extensions) in editable mode"
 pip install -e "$PROJECTS_DIR/fantastic-disco[dev]"
 
+# ---- Step 6b: install this harness repo (sturdy-doodle) ----------------------
+# If this script is running FROM a clone of sturdy-doodle (the canonical case),
+# install it into the same venv so that the harness CLI commands
+# (mnemosyne-experiments, mnemosyne-pipeline, environment-snapshot, obsidian-search,
+#  notion-search, harness-telemetry) are available on $PATH and the library
+# modules import cleanly without sys.path shims. Zero runtime dependencies —
+# installing this is strictly adding declared metadata + entry points.
+if [ -f "$SCRIPT_DIR/pyproject.toml" ]; then
+  log "Installing mnemosyne-harness (this repo) in editable mode"
+  pip install -e "$SCRIPT_DIR" || warn "harness install failed; CLIs will only work as python3 scripts"
+else
+  warn "pyproject.toml not found next to this script — skipping harness install"
+fi
+
 # ---- Step 7: smoke test ------------------------------------------------------
 log "Smoke test: importing both packages"
 python - <<'PY'

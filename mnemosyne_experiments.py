@@ -42,10 +42,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Import the sibling library. Works regardless of cwd.
-_SCRIPT_DIR = Path(__file__).parent.resolve()
-sys.path.insert(0, str(_SCRIPT_DIR))
-import harness_telemetry as ht  # noqa: E402
+# After `pip install -e .`, harness_telemetry is importable directly.
+# The path shim below keeps the module runnable as `python3 mnemosyne_experiments.py`
+# from a clone that hasn't been pip-installed yet.
+try:
+    import harness_telemetry as ht
+except ImportError:
+    _SCRIPT_DIR = Path(__file__).parent.resolve()
+    sys.path.insert(0, str(_SCRIPT_DIR))
+    import harness_telemetry as ht  # noqa: E402
 
 
 # ---- output helpers ----------------------------------------------------------

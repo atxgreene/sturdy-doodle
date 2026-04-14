@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mnemosyne-harness"
+version = "0.1.0"
+description = "Meta-Harness-aligned observability + evaluation substrate for local-first LLM agents"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "atxgreene" }]
+keywords = ["llm", "agent", "harness", "observability", "mnemosyne", "meta-harness"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Zero runtime dependencies. Stdlib only, as documented throughout.
+dependencies = []
+
+[project.optional-dependencies]
+# Only for developers working on this repo. No runtime users need these.
+dev = []
+
+[project.urls]
+Repository = "https://github.com/atxgreene/sturdy-doodle"
+Architecture = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/ARCHITECTURE.md"
+
+# Each entry below creates an executable command on $PATH after `pip install`.
+# The command name on the left stays hyphenated (UX); the module target on the
+# right uses the canonical underscore name.
+[project.scripts]
+mnemosyne-experiments  = "mnemosyne_experiments:main"
+mnemosyne-pipeline     = "mnemosyne_pipeline:main"
+environment-snapshot   = "environment_snapshot:main"
+obsidian-search        = "obsidian_search:main"
+notion-search          = "notion_search:main"
+harness-telemetry      = "harness_telemetry:_main_smoke"
+
+[tool.setuptools]
+# Flat layout: every module lives at the repo root. No src/ directory.
+# This matches the project's philosophy of being immediately readable/
+# hackable without a build step. `pip install -e .` still creates proper
+# console entry points via the [project.scripts] table above.
+py-modules = [
+    "mnemosyne_config",
+    "harness_telemetry",
+    "harness_sweep",
+    "scenario_runner",
+    "mnemosyne_pipeline",
+    "mnemosyne_experiments",
+    "environment_snapshot",
+    "obsidian_search",
+    "notion_search",
+]
+
+[tool.setuptools.package-data]
+"*" = ["scenarios.example.jsonl"]
