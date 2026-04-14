@@ -31,7 +31,11 @@ sys.path.insert(0, str(_REPO))
 
 import harness_sweep as sweep  # noqa: E402
 import harness_telemetry as ht  # noqa: E402
+import mnemosyne_brain as br  # noqa: E402
 import mnemosyne_experiments as mex  # noqa: E402  (direct import after rename)
+import mnemosyne_memory as mm  # noqa: E402
+import mnemosyne_models as mdls  # noqa: E402
+import mnemosyne_skills as sk  # noqa: E402
 import scenario_runner as sr  # noqa: E402
 
 
@@ -670,6 +674,404 @@ def _():
 def _():
     out = mex._ascii_scatter([], set(), "x", "y")
     assert "no points" in out
+
+
+# =============================================================================
+#  mnemosyne_memory (SQLite + FTS5 + ICMS tiers)
+# =============================================================================
+
+@test("memory: write + get roundtrip")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        mid = store.write("User likes dark themes", source="cli", kind="preference", tier=mm.L1_HOT)
+        got = store.get(mid)
+        assert got["content"] == "User likes dark themes"
+        assert got["tier"] == mm.L1_HOT
+        assert got["kind"] == "preference"
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory: FTS5 search returns relevant matches")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        store.write("Project alpha uses rust", kind="project", tier=mm.L2_WARM)
+        store.write("Project beta uses python", kind="project", tier=mm.L2_WARM)
+        store.write("Totally unrelated memory", kind="fact", tier=mm.L2_WARM)
+        hits = store.search("rust", limit=5)
+        assert any("rust" in h["content"] for h in hits), hits
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory: tier_max filter excludes cold memories")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        store.write("hot fact", tier=mm.L1_HOT)
+        store.write("warm fact", tier=mm.L2_WARM)
+        store.write("cold fact", tier=mm.L3_COLD)
+        hits = store.search("fact", tier_max=mm.L2_WARM, limit=10)
+        contents = [h["content"] for h in hits]
+        assert "hot fact" in contents
+        assert "warm fact" in contents
+        assert "cold fact" not in contents
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory: promote/demote tier transitions")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        mid = store.write("a thing", tier=mm.L2_WARM)
+        store.promote(mid, to_tier=mm.L1_HOT)
+        assert store.get(mid)["tier"] == mm.L1_HOT
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory: stats reports tier/kind breakdowns")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        store.write("a", tier=mm.L1_HOT, kind="preference")
+        store.write("b", tier=mm.L2_WARM, kind="fact")
+        store.write("c", tier=mm.L2_WARM, kind="fact")
+        stats = store.stats()
+        assert stats["total"] == 3
+        assert stats["by_tier"]["L1_hot"] == 1
+        assert stats["by_tier"]["L2_warm"] == 2
+        assert stats["by_kind"]["fact"] == 2
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory: telemetry hook fires on write")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        run_id = ht.create_run(model="m", projects_dir=pd)
+        sess = ht.TelemetrySession(run_id, projects_dir=pd)
+        store = mm.MemoryStore(path=pd / "mem.db", telemetry=sess)
+        store.write("watched event", kind="test")
+        store.close()
+        raw = (pd / "experiments" / run_id / "events.jsonl").read_text()
+        assert "memory_write" in raw
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_models (backend abstraction)
+# =============================================================================
+
+@test("models: Backend default is Ollama local")
+def _():
+    b = mdls.Backend()
+    assert b.provider == "ollama"
+    assert "11434" in b.endpoint
+
+
+@test("models: unknown provider without url raises")
+def _():
+    try:
+        mdls.Backend(provider="not-a-thing")
+        assert False, "should have raised"
+    except ValueError:
+        pass
+
+
+@test("models: OpenAI response parser extracts text + tool_calls")
+def _():
+    raw = {
+        "choices": [{"message": {
+            "content": "ok",
+            "tool_calls": [{
+                "id": "t1",
+                "function": {"name": "s", "arguments": '{"q": "v"}'}
+            }],
+        }}],
+        "usage": {"prompt_tokens": 7},
+    }
+    parsed = mdls._parse_openai(raw)
+    assert parsed["text"] == "ok"
+    assert parsed["tool_calls"][0]["arguments"] == {"q": "v"}
+    assert parsed["usage"]["prompt_tokens"] == 7
+
+
+@test("models: Ollama parser converts eval counts to usage")
+def _():
+    raw = {"message": {"content": "hi", "tool_calls": []},
+           "prompt_eval_count": 5, "eval_count": 3}
+    parsed = mdls._parse_ollama(raw)
+    assert parsed["usage"]["total_tokens"] == 8
+
+
+@test("models: Anthropic parser handles mixed text/tool_use blocks")
+def _():
+    raw = {
+        "content": [
+            {"type": "text", "text": "hello "},
+            {"type": "tool_use", "id": "t1", "name": "s", "input": {"q": "v"}},
+        ],
+        "usage": {"input_tokens": 3, "output_tokens": 1},
+    }
+    parsed = mdls._parse_anthropic(raw)
+    assert parsed["text"] == "hello "
+    assert parsed["tool_calls"][0]["name"] == "s"
+    assert parsed["usage"]["total_tokens"] == 4
+
+
+@test("models: from_env falls back to Ollama when no key env vars set")
+def _():
+    # In this test environment, no API keys are set
+    b = mdls.from_env()
+    assert b.provider == "ollama"
+
+
+# =============================================================================
+#  mnemosyne_skills (agentskills.io registry)
+# =============================================================================
+
+@test("skills: @register_python decorator surfaces as OpenAI tool")
+def _():
+    reg = sk.SkillRegistry()
+
+    @reg.register_python("t", "a tool", [{"name": "x", "type": "integer", "required": True}])
+    def _t(x):
+        return x * 2
+
+    assert "t" in reg.names()
+    tools = reg.tools()
+    assert tools[0]["function"]["name"] == "t"
+    assert "x" in tools[0]["function"]["parameters"]["required"]
+
+
+@test("skills: invoke a python skill")
+def _():
+    reg = sk.SkillRegistry()
+
+    @reg.register_python("double", "double", [{"name": "x", "type": "integer"}])
+    def _t(x):
+        return x * 2
+
+    assert reg.get("double").invoke(x=5) == 10
+
+
+@test("skills: parse frontmatter markdown skill file")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        p = pd / "s.md"
+        p.write_text(
+            "---\nname: foo\ndescription: bar\ninvocation: knowledge\n---\n\nbody"
+        )
+        s = sk.parse_skill_file(p)
+        assert s.name == "foo"
+        assert s.description == "bar"
+        assert s.invocation == "knowledge"
+        assert "body" in s.body
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("skills: record_learned_skill writes a valid skill file")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        path = sk.record_learned_skill(
+            name="my_learned",
+            description="auto-written",
+            command="echo {msg}",
+            parameters=[{"name": "msg", "type": "string", "required": True}],
+            projects_dir=pd,
+        )
+        assert path.exists()
+        loaded = sk.parse_skill_file(path)
+        assert loaded.name == "my_learned"
+        assert loaded.learned is True
+        assert loaded.command == "echo {msg}"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("skills: file without frontmatter becomes a knowledge skill")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        p = pd / "plain.md"
+        p.write_text("# Just a note\n\nNo frontmatter here.")
+        s = sk.parse_skill_file(p)
+        assert s.invocation == "knowledge"
+        assert s.name == "plain"
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_brain (end-to-end with mock chat_fn)
+# =============================================================================
+
+def _make_mock_chat(sequence: list[dict[str, Any]]) -> Callable:
+    """Build a chat_fn that returns the next response in `sequence` per call."""
+    counter = [0]
+
+    def chat_fn(messages, **kwargs):
+        i = counter[0]
+        counter[0] += 1
+        if i >= len(sequence):
+            return {"status": "ok", "text": "done", "tool_calls": [],
+                    "usage": None, "duration_ms": 1.0, "raw": {}}
+        base = {"status": "ok", "usage": None, "duration_ms": 1.0, "raw": {}}
+        base.update(sequence[i])
+        return base
+
+    return chat_fn
+
+
+@test("brain: turn without tool calls returns final text directly")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        reg = sk.SkillRegistry()
+        chat_fn = _make_mock_chat([
+            {"text": "the answer is 42", "tool_calls": []},
+        ])
+        brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn)
+        resp = brain.turn("what is the answer?")
+        assert resp.text == "the answer is 42"
+        assert resp.tool_calls == []
+        assert resp.model_calls == 1
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: turn with tool call dispatches through skills and feeds result back")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        reg = sk.SkillRegistry()
+
+        @reg.register_python("add", "add two", [
+            {"name": "a", "type": "integer", "required": True},
+            {"name": "b", "type": "integer", "required": True},
+        ])
+        def _add(a, b):
+            return {"sum": a + b}
+
+        chat_fn = _make_mock_chat([
+            {"text": "", "tool_calls": [
+                {"id": "t1", "name": "add", "arguments": {"a": 2, "b": 3}}
+            ]},
+            {"text": "2+3=5", "tool_calls": []},
+        ])
+        brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn)
+        resp = brain.turn("add two and three")
+        assert resp.text == "2+3=5"
+        assert len(resp.tool_calls) == 1
+        assert resp.tool_calls[0]["name"] == "add"
+        assert resp.tool_calls[0]["result"] == {"sum": 5}
+        assert resp.model_calls == 2
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: max_tool_iterations caps runaway tool loops")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        reg = sk.SkillRegistry()
+
+        @reg.register_python("loop", "always loops", [])
+        def _loop():
+            return {"keep_going": True}
+
+        # Mock always returns a tool call — brain should cap at max_tool_iterations
+        def chat_fn(messages, **kwargs):
+            return {
+                "status": "ok",
+                "text": "",
+                "tool_calls": [{"id": "t", "name": "loop", "arguments": {}}],
+                "usage": None, "duration_ms": 1.0, "raw": {},
+            }
+
+        cfg = br.BrainConfig(max_tool_iterations=2, inject_env_snapshot=False)
+        brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn, config=cfg)
+        resp = brain.turn("start loop")
+        # Should have stopped at max_tool_iterations model calls
+        assert resp.model_calls == 2
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: session_metrics returns expected shape")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        reg = sk.SkillRegistry()
+        chat_fn = _make_mock_chat([{"text": "ok", "tool_calls": []}])
+        brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn)
+        brain.turn("hello")
+        m = brain.session_metrics()
+        assert m["turns_total"] == 1
+        assert m["turns_successful"] == 1
+        assert m["accuracy"] == 1.0
+        assert m["model_calls_total"] == 1
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: learn_skill writes a skill file that's immediately loadable")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        # Point projects_dir at our temp dir for the learn_skill call
+        import os
+        orig = os.environ.get("MNEMOSYNE_PROJECTS_DIR")
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        try:
+            store = mm.MemoryStore(path=pd / "mem.db")
+            reg = sk.SkillRegistry()
+            chat_fn = _make_mock_chat([{"text": "ok", "tool_calls": []}])
+            brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn)
+            path = brain.learn_skill(
+                name="auto_test",
+                description="a learned tool",
+                command="echo {x}",
+                parameters=[{"name": "x", "type": "string", "required": True}],
+            )
+            assert path.exists()
+            # The skill should be loaded into the registry after learn_skill
+            assert reg.get("auto_test") is not None
+            store.close()
+        finally:
+            if orig is None:
+                os.environ.pop("MNEMOSYNE_PROJECTS_DIR", None)
+            else:
+                os.environ["MNEMOSYNE_PROJECTS_DIR"] = orig
+    finally:
+        shutil.rmtree(pd)
 
 
 # =============================================================================

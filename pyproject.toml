@@ -60,6 +60,11 @@ py-modules = [
     "environment_snapshot",
     "obsidian_search",
     "notion_search",
+    # v1 agent-framework modules (see docs/ARCHITECTURE.md)
+    "mnemosyne_memory",
+    "mnemosyne_models",
+    "mnemosyne_skills",
+    "mnemosyne_brain",
 ]
 
 [tool.setuptools.package-data]

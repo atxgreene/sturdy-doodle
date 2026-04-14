@@ -2,31 +2,51 @@
 
 Reproducible bootstrap for the Mnemosyne local-agent stack on WSL2 / Ubuntu / Linux.
 
-This repo is a **`pip install -e .`-able Python package** that wraps the Mnemosyne agent stack with a full harness-deployment + observability + evaluation suite. Zero runtime dependencies beyond the Python stdlib. Six console commands, nine library modules, plus shell scripts for bootstrap and wizard flows.
+**Mnemosyne is a local-first, consciousness-aware agent framework** with a built-in Meta-Harness-aligned observability substrate. This repo is the pip-installable Python package that ties everything together:
 
-**Deployment layer:**
+- **Agent core:** routing brain, SQLite+FTS5 memory with ICMS 3-tier (L1/L2/L3), agentskills.io-compatible skill registry, model-agnostic backend (Ollama + any OpenAI-compatible HTTP endpoint — OpenRouter, Anthropic, Nous Portal, Together, Fireworks, vLLM, LM Studio)
+- **Consciousness layer:** integrates with fantastic-disco's TurboQuant / metacognition / dream consolidation / autobiography / behavioral coupling (graceful no-op when not installed)
+- **Meta-Harness observability:** raw-trace telemetry, experiment runs, parameter sweeps, scenario evaluation, Pareto frontier analysis — designed for optimization, not dashboards
+- **Deployment:** installer, interactive wizard (whiptail TUI), validate/health check, skill helpers for Obsidian + Notion
+
+Zero runtime dependencies. Stdlib only. Honest comparison with Hermes Agent, OpenClaw, and the observability tool landscape in [`docs/POSITIONING.md`](./docs/POSITIONING.md).
+
+### Agent framework (v1)
+
+| Module | Role |
+|---|---|
+| `mnemosyne_brain.py` | Routing orchestrator. One turn = retrieve memory → build prompt (+env snapshot +AGENTS.md/TOOLS.md) → call model → dispatch tools → feed back → respond → persist. Integrates with eternal-context ICMS + fantastic-disco ConsciousnessLoop when installed. |
+| `mnemosyne_memory.py` | SQLite+FTS5 memory with ICMS 3-tier (L1 hot / L2 warm / L3 cold). Promote/demote/evict operations. Every op logs to telemetry. |
+| `mnemosyne_models.py` | Model-agnostic backend. One `chat()` API for Ollama + any OpenAI-compatible HTTP endpoint: OpenRouter, OpenAI, Anthropic, Together, Fireworks, Nous Portal, vLLM, LM Studio. Stdlib only. |
+| `mnemosyne_skills.py` | agentskills.io-compatible skill registry. Loads markdown skill files, in-process `@register_python` decorators, and installed $PATH commands. Self-improvement: `record_learned_skill()` writes a new skill file. |
+| `mnemosyne_config.py` | Shared config single-source-of-truth (PROJECTS_DIR, .env parsing, Ollama host). |
+
+### Observability substrate (Meta-Harness aligned)
+
+| Module | Role |
+|---|---|
+| `harness_telemetry.py` | Observability library + experiments-directory convention. `create_run` / `finalize_run` / `TelemetrySession` / `@trace` decorator. Secrets redacted by key name. **Events written raw — no summarization**, per the paper's core argument. |
+| `mnemosyne_experiments.py` | CLI over the experiments tree. `list` / `show` / `top-k` / `pareto` (with `--plot`) / `diff` / `events` / `aggregate`. Entry point: `mnemosyne-experiments`. |
+| `environment_snapshot.py` | First-turn context injection. Pre-computes projects dir, `.env` key names (never values), Ollama models, **GPU info**, model architecture classification (DeltaNet-hybrid vs standard-attention), venv, skills, vault, disk. Entry point: `environment-snapshot`. |
+| `harness_sweep.py` | Deterministic parameter-space grid search using the telemetry substrate. |
+| `scenario_runner.py` | JSONL-driven evaluation harness with pluggable judges. |
+| `mnemosyne_pipeline.py` | OBSERVE→EVALUATE→SWEEP→COMPARE→INSPECT in one call. Entry point: `mnemosyne-pipeline`. |
+
+### Skill helpers (stdlib-only, read-only)
+
+| Module | Role |
+|---|---|
+| `obsidian_search.py` | Obsidian vault helper. `search` / `read` / `list-recent`. Ripgrep fast-path, pure-Python fallback. Path-traversal safe. Entry point: `obsidian-search`. |
+| `notion_search.py` | Notion workspace helper. Same shape as obsidian-search, Bearer-auth via `NOTION_API_KEY`. Entry point: `notion-search`. |
+
+### Deployment
 
 | Script | Role |
 |---|---|
-| `install-mnemosyne.sh` | Unattended bootstrap. Installs Ollama, pulls a model, clones both upstream repos, builds a Python venv, smoke-tests the imports. Idempotent. |
+| `install-mnemosyne.sh` | Unattended bootstrap. Installs Ollama, pulls a model, clones both upstream repos, builds a Python venv, `pip install -e .` of this harness repo, smoke-tests imports. Idempotent. |
 | `mnemosyne-wizard.sh` | Interactive post-install wizard (whiptail TUI with text fallback). Six steps: LLM backend, Telegram, Slack, Obsidian, Notion, write `~/projects/mnemosyne/.env`. |
-| `validate-mnemosyne.sh` | Health-check. Runs four checks (Ollama daemon, model present, Python imports, agent CLI loads) and exits non-zero on failure. Useful for `make check` / CI. |
-
-**Skill helpers** (interface-agnostic, Python stdlib only):
-
-| Script | Role |
-|---|---|
-| `obsidian-search.py` | Obsidian vault helper. `search` / `read` / `list-recent` subcommands, read-only, path-traversal safe, JSON or human output. Uses ripgrep if available, pure-Python fallback. See [`SETUP.md`](./SETUP.md#obsidian-skill). |
-| `notion-search.py` | Same shape as `obsidian-search.py`, backed by the Notion API. Read-only, Bearer-auth via `NOTION_API_KEY` env var. See [`SETUP.md`](./SETUP.md#notion-skill). |
-
-**Harness observability** (see [`SETUP.md`](./SETUP.md#harness-observability) for the architecture — inspired directly by the Stanford Meta-Harness paper, 2026):
-
-| Script | Role |
-|---|---|
-| `harness_telemetry.py` | Observability library + experiments-directory convention. `create_run` / `finalize_run` / `TelemetrySession` / `@trace` decorator. Secrets are redacted by key name at write time. Events are written raw (no summarization — deliberately; see the paper's "compressed feedback is the failure mode" argument). |
-| `mnemosyne-experiments.py` | CLI over the experiments tree. `list` / `show` / `top-k` / `pareto` / `diff` / `events` subcommands. Implements the six operations the Meta-Harness paper recommends for navigating a run history. |
-| `environment-snapshot.py` | Pre-computes `$PROJECTS_DIR` / `.env` keys / Ollama models / venv / skills / vault / disk into a single markdown preamble or JSON dict. Mirrors the Meta-Harness "Terminal-Bench 2" optimization: inject the environment into the first LLM call instead of letting the agent discover it across 2–4 exploratory turns. **Never emits `.env` values.** |
-| `test-harness.sh` | End-to-end integration test. 23 assertions covering all four observability components — run creation, event logging, secret redaction, CLI semantics (list, top-k with direction, Pareto frontier with multi-axis dominance, diff, events filtering), environment snapshot output + secret safety. Safe to run repeatedly, no network. |
+| `validate-mnemosyne.sh` | Health-check. Four checks (Ollama daemon, model present, Python imports, agent CLI loads). Non-zero exit on failure. |
+| `test-harness.sh` | End-to-end integration test. 29 assertions. No network. |
 
 The two Python packages live in their own repos and are cloned by the bootstrap:
 
