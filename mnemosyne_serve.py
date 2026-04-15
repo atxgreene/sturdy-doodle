@@ -260,6 +260,36 @@ class Service:
         except Exception as e:
             return {"error": type(e).__name__, "message": str(e)}
 
+    def handle_memory_search(self, query: str, limit: int,
+                              tier_max: int | None) -> dict[str, Any]:
+        """FTS5 search over the agent's memory.
+
+        Protected read — returns at most 50 rows per request. Used by
+        the UI's Memory Browser panel. We do NOT expose raw metadata
+        that might include secrets; only content + tier + kind + created.
+        """
+        limit = max(1, min(50, int(limit)))
+        try:
+            hits = self.memory.search(query, limit=limit,
+                                        tier_max=tier_max)
+        except Exception as e:
+            return {"error": type(e).__name__, "message": str(e)}
+        return {
+            "query": query,
+            "hits": [
+                {
+                    "id": h["id"],
+                    "tier": h["tier"],
+                    "kind": h["kind"],
+                    "source": h["source"],
+                    "content": (h["content"] or "")[:500],
+                    "created_utc": h["created_utc"],
+                    "access_count": h["access_count"],
+                }
+                for h in hits
+            ],
+        }
+
     def handle_recent_events(self, limit: int) -> dict[str, Any]:
         import harness_telemetry as ht
         rd = ht.run_path(self.run_id, self.pd)
@@ -318,7 +348,11 @@ class Handler(BaseHTTPRequestHandler):
         if not tok:
             return True
         header = self.headers.get("Authorization") or ""
-        return header == f"Bearer {tok}"
+        expected = f"Bearer {tok}"
+        # Constant-time comparison — protect against timing side-channels
+        # when the token is exposed on a LAN or behind a reverse proxy.
+        import hmac
+        return hmac.compare_digest(header, expected)
 
     def _send_json(self, code: int, obj: Any) -> None:
         body = json.dumps(obj, default=str).encode("utf-8")
@@ -328,10 +362,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # Hard cap on POST bodies. 1 MiB is plenty for /turn (user_message
+    # + metadata); anything larger is almost certainly abuse. Protects
+    # against lazy DoS from a client that tries to send GBs.
+    MAX_BODY_BYTES = 1 * 1024 * 1024
+
     def _read_body(self) -> dict[str, Any]:
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0:
             return {}
+        if n > self.MAX_BODY_BYTES:
+            raise HTTPError(413, f"payload too large "
+                              f"(got {n}, cap {self.MAX_BODY_BYTES})")
         raw = self.rfile.read(n)
         try:
             obj = json.loads(raw.decode("utf-8"))
@@ -368,6 +410,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and path == "/avatar":
                 self._send_json(200, self.service.handle_avatar())
+                return
+            if method == "GET" and path == "/memory/search":
+                q = query.get("q", "")
+                lim = int(query.get("limit", 20))
+                tmx = query.get("tier_max")
+                tier_max = int(tmx) if tmx is not None else None
+                self._send_json(200,
+                    self.service.handle_memory_search(q, lim, tier_max))
                 return
             if method == "GET" and path == "/events_stream":
                 self._stream_events()

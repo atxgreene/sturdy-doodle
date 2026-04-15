@@ -2,6 +2,46 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.3.3] — 2026-04-15 — safety hardening + memory browser panel
+
+Security and transparency improvements. The daemon is now safe to
+expose on a LAN behind a reverse proxy, and the dashboard lets users
+directly inspect what the agent remembers.
+
+**`mnemosyne_serve` safety hardening:**
+  - Constant-time bearer-token compare via `hmac.compare_digest`.
+    Response time no longer leaks matching prefix length — protects
+    against a LAN attacker with timing access.
+  - 1 MiB cap on POST bodies. Requests with `Content-Length` above
+    that are rejected with HTTP 413 *before* the body is read.
+    Prevents lazy DoS from clients sending oversized payloads.
+
+**Memory browser — new UI panel + endpoint.** The bottom of the
+dashboard is now an interactive FTS5 search over the agent's memory:
+  - `GET /memory/search?q=…&limit=N&tier_max=N` — returns up to 50
+    matches with id, tier, kind, source, content (truncated to
+    500 chars), created_utc, access_count.
+  - UI wiring: search box, tier filter (all / L1 / L1+L2 / L1+L2+L3),
+    live results list with colored tier pills and access-count badges.
+  - Use cases documented in `docs/UI.md`: debug bad retrievals, audit
+    what the agent knows, spot near-duplicates signaling a dream
+    consolidation is due.
+
+**Docs:**
+  - `docs/UI.md` gains an "AGI-scaling traits (v1 schema)" table
+    documenting how wisdom / restlessness / novelty / self_assessment
+    are derived and when they're null. Explicit contract, no magic.
+  - Memory-browser section added to `docs/UI.md`.
+  - Security section updated with constant-time compare + body cap.
+  - `docs/dashboard.png` regenerated showing the new panel layout.
+
+**Tests:** 196 → 200 green. 4 new covering constant-time compare,
+`MAX_BODY_BYTES` sanity, memory search shape and tier filter, and
+memory search respecting the 50-row cap.
+
+Verified: 8 consecutive full-suite runs all 200/200. pyflakes clean.
+Version bumped 0.3.2 → 0.3.3.
+
 ## [0.3.2] — 2026-04-15 — AGI traits + habitat + production deploy
 
 Three additions, each narrow:

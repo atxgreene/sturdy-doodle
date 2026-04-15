@@ -282,6 +282,49 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+// ---- memory browser --------------------------------------------------------
+
+async function searchMemory() {
+  const q = document.getElementById("mb-input").value.trim();
+  const tier = document.getElementById("mb-tier").value;
+  const results = document.getElementById("mb-results");
+  results.innerHTML = `<li style="color:var(--text-dim);padding:6px 0">searching…</li>`;
+  const url = new URL("/memory/search", window.location.origin);
+  if (q) url.searchParams.set("q", q);
+  url.searchParams.set("limit", "30");
+  if (tier) url.searchParams.set("tier_max", tier);
+  try {
+    const r = await jget(url.pathname + url.search);
+    results.innerHTML = "";
+    const hits = r.hits || [];
+    if (hits.length === 0) {
+      results.innerHTML = `<li style="color:var(--text-dim);padding:6px 0">no hits</li>`;
+      return;
+    }
+    for (const h of hits) {
+      const li = document.createElement("li");
+      const ts = (h.created_utc || "").slice(0, 10);
+      li.innerHTML =
+        `<span class="mb-tier t${h.tier}">L${h.tier}</span>`
+        + `<span class="mb-kind">${escapeHtml(h.kind || "")}</span>`
+        + `<span class="mb-content">${escapeHtml(h.content || "")}</span>`
+        + `<span class="mb-meta">${ts} · ×${h.access_count || 0}</span>`;
+      results.appendChild(li);
+    }
+  } catch (e) {
+    results.innerHTML = `<li style="color:var(--error);padding:6px 0">error: ${escapeHtml(e.message)}</li>`;
+  }
+}
+
+function wireMemoryBrowser() {
+  const form = document.getElementById("mb-form");
+  if (!form) return;
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    searchMemory();
+  });
+}
+
 // ---- bootstrap -------------------------------------------------------------
 
 function startPolling(fn, interval) {
@@ -292,6 +335,7 @@ function startPolling(fn, interval) {
 document.addEventListener("DOMContentLoaded", () => {
   wireChatForm();
   wireGoalForm();
+  wireMemoryBrowser();
   startPolling(refreshAvatar, POLL_AVATAR_MS);
   startPolling(refreshMemory, POLL_STATS_MS);
   startPolling(refreshGoals,  POLL_GOALS_MS);

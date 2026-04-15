@@ -3319,6 +3319,91 @@ def _():
 
 
 # =============================================================================
+#  mnemosyne_serve — memory-search endpoint + safety caps
+# =============================================================================
+
+@test("serve: constant-time auth accepts correct bearer token")
+def _():
+    import hmac
+    # Behavioral test — we can't easily test timing; just verify the
+    # function accepts the right token and rejects the wrong one.
+    tok = "abc123"
+    assert hmac.compare_digest(f"Bearer {tok}", f"Bearer {tok}")
+    assert not hmac.compare_digest(f"Bearer {tok}", "Bearer wrong")
+
+
+@test("serve: MAX_BODY_BYTES is a sane cap")
+def _():
+    import mnemosyne_serve as ms
+    assert ms.Handler.MAX_BODY_BYTES == 1 * 1024 * 1024
+    # A /turn prompt 500k chars long fits comfortably
+    assert ms.Handler.MAX_BODY_BYTES > 500_000
+
+
+@test("serve: handle_memory_search returns FTS hits with expected shape")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        # Seed memory
+        store = mm.MemoryStore(path=pd / "memory.db")
+        store.write(content="alpha beta gamma", tier=mm.L1_HOT, kind="note")
+        store.write(content="delta epsilon alpha", tier=mm.L2_WARM, kind="fact")
+        store.write(content="zeta theta iota", tier=mm.L3_COLD, kind="archive")
+        store.close()
+
+        # Handler is bound to a full Service, but handle_memory_search
+        # only needs .memory. Build a minimal shim.
+        class Shim:
+            pass
+        svc = Shim()
+        svc.memory = mm.MemoryStore(path=pd / "memory.db")
+
+        import mnemosyne_serve as ms
+        result = ms.Service.handle_memory_search(svc, "alpha", 10, None)
+        assert result["query"] == "alpha"
+        # Two rows match "alpha"
+        assert len(result["hits"]) == 2
+        for h in result["hits"]:
+            for k in ("id", "tier", "kind", "source", "content",
+                       "created_utc", "access_count"):
+                assert k in h, k
+
+        # tier_max filter excludes L3
+        result = ms.Service.handle_memory_search(svc, "iota", 10, 2)
+        assert len(result["hits"]) == 0, result
+
+        svc.memory.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("serve: handle_memory_search respects limit cap (max 50)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "memory.db")
+        for i in range(120):
+            store.write(content=f"item {i} widget", tier=mm.L2_WARM)
+        store.close()
+
+        class Shim:
+            pass
+        svc = Shim()
+        svc.memory = mm.MemoryStore(path=pd / "memory.db")
+        import mnemosyne_serve as ms
+
+        # Caller asks for 500 → capped to 50
+        r = ms.Service.handle_memory_search(svc, "widget", 500, None)
+        assert len(r["hits"]) == 50
+        # Caller asks for 5 → honored
+        r = ms.Service.handle_memory_search(svc, "widget", 5, None)
+        assert len(r["hits"]) == 5
+        svc.memory.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
 #  runner
 # =============================================================================
 

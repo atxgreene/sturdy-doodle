@@ -98,6 +98,26 @@
       <div class="memory-numbers" id="memory-numbers"></div>
     </section>
 
+    <!-- memory browser -->
+    <section class="panel panel-membrowse">
+      <h2>Memory browser
+        <span class="hint">FTS5 search across all memory tiers</span>
+      </h2>
+      <form class="mb-form" id="mb-form">
+        <input type="text" id="mb-input"
+               placeholder="Search memories (e.g. 'dark mode', 'meeting')…"
+               autocomplete="off" />
+        <select id="mb-tier" title="Tier filter">
+          <option value="">all</option>
+          <option value="1">L1 hot</option>
+          <option value="2">L1+L2</option>
+          <option value="3">L1+L2+L3</option>
+        </select>
+        <button type="submit">Find</button>
+      </form>
+      <ul class="mb-results" id="mb-results"></ul>
+    </section>
+
   </main>
 
   <script src="/ui/static/avatar.js"></script>
