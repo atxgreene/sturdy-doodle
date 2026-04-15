@@ -4,6 +4,65 @@ All notable changes to the Mnemosyne harness deployment repo. The format is loos
 
 ## [0.2.0] — 2026-04-15 — v1.2 rigor pass + architectural primitives
 
+### v1.2.3 — Hermes-port: extended tool-call parsers + builtin skill library
+
+Two ports from NousResearch/hermes-agent (MIT), attributed, kept
+narrow:
+
+**`mnemosyne_tool_parsers.py`** — recovers text-embedded tool calls
+from assistant responses that don't come through the server's
+structured `tool_calls` field. Five parsers:
+
+- `parse_hermes` — `<tool_call>{...}</tool_call>` (Nous Hermes,
+  Qwen-Agent)
+- `parse_mistral` — `[TOOL_CALLS][{...}]`
+- `parse_llama3` — `<|python_tag|>{...}<|eom_id|>` (with
+  "parameters" alias)
+- `parse_functionary` — fenced-JSON with required `name` key (avoids
+  over-firing on unrelated fenced JSON)
+- `parse_trailing_json` — plain JSON object at end of message,
+  conservative fallback
+
+`parse_any(text, hint=None)` dispatches in priority order.
+`strip_tool_calls(text)` removes the envelopes so user-visible
+responses don't leak raw tags. `_recover_embedded_tool_calls()` is
+wired into both `_parse_openai` and `_parse_ollama` in
+`mnemosyne_models`: if the server didn't return structured calls, we
+pull them out of the text. Means local Qwen 3.5 via Ollama with no
+tool-call parser configured now produces structured calls anyway.
+
+Compared to Hermes's eleven parsers, we ship five — the ones that
+cover ~95% of observed local-model behavior. The dispatcher is
+extensible: add a new parser to `PARSERS` and it joins the fallback
+order.
+
+**`mnemosyne_skills_builtin.py`** — curated 11-skill library,
+stdlib-only, safety-audited:
+
+- `fs_read` / `fs_list` / `fs_write_safe` — root-jailed to
+  `$MNEMOSYNE_PROJECTS_DIR`; path-traversal rejected; atomic writes;
+  overwrite requires opt-in
+- `grep_code` — pure-Python regex across glob-matched files
+- `http_get` / `web_fetch_text` — read-only GET; 10s timeout; 2MB
+  cap; HTTP/HTTPS only; strips HTML tags for `web_fetch_text`
+- `sqlite_query` — SELECT/WITH only; rejects multi-statement; bounded
+  limit
+- `shell_exec_safe` — allow-list (`ls cat head tail wc file git which
+  pwd date uname env python3 pip`); no `shell=True`; timeout
+- `git_status` / `git_log` — subprocess to `git` at the projects
+  root, bounded timeout
+- `datetime_now` — pure, no I/O
+
+`register_builtin_skills(registry, names=None)` wires all or a subset
+into a `SkillRegistry`. `default_registry()` now includes them by
+default (precedence: builtins → $PATH commands → markdown skills
+→ learned skills). Pass `load_builtins=False` for a narrower agent.
+
+Tests: 156 → 174 green. 18 new covering every parser (success +
+malformed-input safety + strip + integration) and every skill
+(traversal rejection, overwrite guard, glob filter, SELECT-only guard,
+allow-list enforcement, scheme guard, registry integration).
+
 ### v1.2.2 — consolidation pass + GIF demo
 
 Cleanup + deliverable improvements.

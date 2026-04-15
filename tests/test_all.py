@@ -45,6 +45,8 @@ import mnemosyne_models as mdls  # noqa: E402
 import mnemosyne_proposer as proposer  # noqa: E402
 import mnemosyne_scengen as scengen  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
+import mnemosyne_skills_builtin as sbi  # noqa: E402
+import mnemosyne_tool_parsers as tp  # noqa: E402
 import mnemosyne_train as train_mod  # noqa: E402
 import mnemosyne_triage as tri  # noqa: E402
 import scenario_runner as sr  # noqa: E402
@@ -2627,6 +2629,235 @@ def _():
         assert deltas == {"s1": 1, "s2": 1}
     finally:
         shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_tool_parsers — extended tool-call extraction
+# =============================================================================
+
+@test("tool_parsers: hermes <tool_call> tag extracts name + arguments")
+def _():
+    text = ('okay here we go: <tool_call>{"name":"search_web",'
+            '"arguments":{"query":"rain"}}</tool_call>')
+    calls = tp.parse_hermes(text)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "search_web"
+    assert calls[0]["arguments"] == {"query": "rain"}
+
+
+@test("tool_parsers: mistral [TOOL_CALLS] inline format")
+def _():
+    text = '[TOOL_CALLS] [{"name":"calc","arguments":{"expr":"2+2"}}]'
+    calls = tp.parse_mistral(text)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "calc"
+
+
+@test("tool_parsers: llama-3 python-tag format with 'parameters' alias")
+def _():
+    text = ('<|python_tag|>{"name":"weather",'
+            '"parameters":{"city":"Paris"}}<|eom_id|>')
+    calls = tp.parse_llama3(text)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "weather"
+    assert calls[0]["arguments"] == {"city": "Paris"}
+
+
+@test("tool_parsers: functionary fenced-JSON requires 'name' key")
+def _():
+    # Legitimate tool call
+    text = '```json\n{"name":"add","arguments":{"a":1}}\n```'
+    assert tp.parse_functionary(text)
+    # JSON without "name" is NOT a tool call
+    text2 = '```json\n{"result":42}\n```'
+    assert not tp.parse_functionary(text2)
+
+
+@test("tool_parsers: parse_any tries each parser, returns first hit")
+def _():
+    text = '<tool_call>{"name":"x","arguments":{}}</tool_call>'
+    calls = tp.parse_any(text)
+    assert calls and calls[0]["name"] == "x"
+    assert tp.detect_format(text) == "hermes"
+    # No match returns []
+    assert tp.parse_any("just plain text no tool calls") == []
+
+
+@test("tool_parsers: strip_tool_calls removes envelopes")
+def _():
+    text = ('preamble <tool_call>{"name":"x","arguments":{}}</tool_call> '
+            'after text')
+    clean = tp.strip_tool_calls(text)
+    assert "<tool_call>" not in clean
+    assert "preamble" in clean and "after text" in clean
+
+
+@test("tool_parsers: malformed JSON does not raise")
+def _():
+    # Unterminated tag body
+    assert tp.parse_hermes("<tool_call>{broken json}</tool_call>") == []
+    # Garbage input
+    assert tp.parse_any("") == []
+    assert tp.parse_any("x" * 10000) == []
+
+
+@test("tool_parsers: models _recover_embedded_tool_calls integrates parser")
+def _():
+    text = ('Sure! <tool_call>{"name":"lookup","arguments":'
+            '{"q":"cat"}}</tool_call>')
+    calls, cleaned = mdls._recover_embedded_tool_calls(text)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "lookup"
+    assert "<tool_call>" not in cleaned
+
+
+# =============================================================================
+#  mnemosyne_skills_builtin — curated skill library
+# =============================================================================
+
+@test("builtin: register_builtin_skills populates 11 skills")
+def _():
+    from mnemosyne_skills import SkillRegistry
+    reg = SkillRegistry()
+    n = sbi.register_builtin_skills(reg)
+    assert n == 11, n
+    for name in ("fs_read", "fs_list", "fs_write_safe", "grep_code",
+                   "http_get", "web_fetch_text", "sqlite_query",
+                   "shell_exec_safe", "git_status", "git_log", "datetime_now"):
+        assert name in reg.names(), name
+
+
+@test("builtin: fs_read reads under root, rejects traversal")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        (pd / "hello.txt").write_text("hello world", encoding="utf-8")
+        r = sbi.fs_read("hello.txt", root=str(pd))
+        assert r["content"] == "hello world"
+        # Traversal rejected
+        try:
+            sbi.fs_read("../../../etc/passwd", root=str(pd))
+            raised = False
+        except PermissionError:
+            raised = True
+        assert raised, "expected PermissionError on traversal"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("builtin: fs_list filters hidden + applies pattern")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        (pd / "a.py").write_text("x")
+        (pd / "b.py").write_text("y")
+        (pd / ".hidden.py").write_text("z")
+        (pd / "c.md").write_text("m")
+        r = sbi.fs_list(".", root=str(pd), pattern="*.py")
+        names = {e["name"] for e in r["entries"]}
+        assert names == {"a.py", "b.py"}, names
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("builtin: fs_write_safe atomic + no overwrite by default")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        r1 = sbi.fs_write_safe("note.txt", "first", root=str(pd))
+        assert r1.get("written")
+        # Second write without overwrite=True is refused
+        r2 = sbi.fs_write_safe("note.txt", "second", root=str(pd))
+        assert r2.get("error"), r2
+        # With overwrite=True it goes through
+        r3 = sbi.fs_write_safe("note.txt", "second", root=str(pd),
+                                 overwrite=True)
+        assert r3.get("written")
+        assert (pd / "note.txt").read_text() == "second"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("builtin: grep_code finds pattern across files")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        (pd / "a.py").write_text("def foo():\n    pass\n")
+        (pd / "b.py").write_text("def bar():\n    return 42\n")
+        r = sbi.grep_code(r"^def ", root=str(pd), include="*.py")
+        assert len(r["matches"]) == 2
+        files = {m["path"] for m in r["matches"]}
+        assert files == {"a.py", "b.py"}
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("builtin: sqlite_query rejects non-SELECT")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        import sqlite3 as _s
+        db = pd / "t.db"
+        c = _s.connect(str(db))
+        c.execute("CREATE TABLE t (x INTEGER)")
+        c.executemany("INSERT INTO t VALUES (?)", [(1,), (2,), (3,)])
+        c.commit()
+        c.close()
+        r = sbi.sqlite_query(str(db), "SELECT x FROM t ORDER BY x")
+        assert [row["x"] for row in r["rows"]] == [1, 2, 3]
+        # Write rejected
+        r2 = sbi.sqlite_query(str(db), "DROP TABLE t")
+        assert r2.get("error")
+        # Multiple statements rejected
+        r3 = sbi.sqlite_query(str(db), "SELECT 1; SELECT 2")
+        assert r3.get("error")
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("builtin: shell_exec_safe enforces allow-list")
+def _():
+    r = sbi.shell_exec_safe("ls -la /")
+    assert r["argv"][0] == "ls"
+    assert r["exit_code"] == 0
+    # Unlisted command rejected
+    r2 = sbi.shell_exec_safe("rm -rf /")
+    assert r2.get("error") and "allow-list" in r2["error"]
+    # Empty input
+    r3 = sbi.shell_exec_safe("")
+    assert r3.get("error")
+
+
+@test("builtin: http_get rejects non-http schemes")
+def _():
+    r = sbi.http_get("file:///etc/passwd")
+    assert r.get("error") and "not allowed" in r["error"]
+    r2 = sbi.http_get("ftp://example.com")
+    assert r2.get("error") and "not allowed" in r2["error"]
+
+
+@test("builtin: datetime_now returns a well-formed ISO string")
+def _():
+    r = sbi.datetime_now()
+    assert "T" in r["iso"] and r["tz"] == "UTC"
+    # Parse roundtrip sanity
+    from datetime import datetime as _dt
+    _dt.fromisoformat(r["iso"].replace("Z", "+00:00"))
+
+
+@test("builtin: default_registry loads builtins by default")
+def _():
+    from mnemosyne_skills import default_registry
+    reg = default_registry(discover_commands=False, load_learned=False,
+                             projects_dir=_tmp_projects_dir())
+    names = reg.names()
+    for n in ("fs_read", "http_get", "git_status"):
+        assert n in names, n
+    # Opt-out works
+    reg2 = default_registry(discover_commands=False, load_learned=False,
+                              load_builtins=False,
+                              projects_dir=_tmp_projects_dir())
+    assert "fs_read" not in reg2.names()
 
 
 # =============================================================================

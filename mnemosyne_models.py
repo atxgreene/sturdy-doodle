@@ -659,6 +659,11 @@ def _parse_openai(raw: dict) -> dict[str, Any]:
                 "name": fn.get("name"),
                 "arguments": _parse_json_safe(fn.get("arguments")),
             })
+    # Fallback: if no structured tool_calls came back but the assistant
+    # text contains Hermes/Mistral/Llama-3 embedded calls, recover them.
+    # See mnemosyne_tool_parsers. Strips envelopes from `text` on match.
+    if not tool_calls and text:
+        tool_calls, text = _recover_embedded_tool_calls(text)
     return {"text": text, "tool_calls": tool_calls, "usage": raw.get("usage")}
 
 
@@ -673,6 +678,10 @@ def _parse_ollama(raw: dict) -> dict[str, Any]:
             "name": fn.get("name"),
             "arguments": fn.get("arguments", {}),
         })
+    # Fallback for Ollama models that emit text-embedded tool calls
+    # (Hermes/Qwen-Agent/Mistral tags) rather than the structured field.
+    if not tool_calls and text:
+        tool_calls, text = _recover_embedded_tool_calls(text)
     usage: dict[str, Any] | None = None
     if "prompt_eval_count" in raw or "eval_count" in raw:
         usage = {
@@ -682,6 +691,21 @@ def _parse_ollama(raw: dict) -> dict[str, Any]:
                           + (raw.get("eval_count") or 0),
         }
     return {"text": text, "tool_calls": tool_calls, "usage": usage}
+
+
+def _recover_embedded_tool_calls(text: str) -> tuple[list[dict], str]:
+    """Extract text-embedded tool calls (Hermes/Qwen/Mistral/Llama-3
+    envelopes). Returns (tool_calls, cleaned_text). On no match, the
+    original text is returned untouched and tool_calls is [].
+    """
+    try:
+        import mnemosyne_tool_parsers as tp
+    except ImportError:  # pragma: no cover
+        return [], text
+    calls = tp.parse_any(text)
+    if not calls:
+        return [], text
+    return calls, tp.strip_tool_calls(text)
 
 
 def _parse_anthropic(raw: dict) -> dict[str, Any]:

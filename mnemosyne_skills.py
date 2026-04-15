@@ -438,16 +438,27 @@ def default_registry(
     *,
     load_learned: bool = True,
     discover_commands: bool = True,
+    load_builtins: bool = True,
     projects_dir: Path | None = None,
 ) -> SkillRegistry:
     """Build a registry populated from the conventional locations.
 
     Order of precedence (last wins on name collision):
-      1. Installed $PATH commands (obsidian-search, notion-search)
-      2. $PROJECTS_DIR/skills/*.md
-      3. $PROJECTS_DIR/skills/learned/*.md
+      1. Built-in Python skills (fs_read, http_get, git_status, …)
+      2. Installed $PATH commands (obsidian-search, notion-search)
+      3. $PROJECTS_DIR/skills/*.md
+      4. $PROJECTS_DIR/skills/learned/*.md
+
+    Pass `load_builtins=False` for a narrower agent that only has
+    user-written skills.
     """
     reg = SkillRegistry()
+    if load_builtins:
+        try:
+            from mnemosyne_skills_builtin import register_builtin_skills
+            register_builtin_skills(reg)
+        except ImportError:
+            pass
     if discover_commands:
         reg.discover_path_commands()
     pd = projects_dir or _default_projects_dir()

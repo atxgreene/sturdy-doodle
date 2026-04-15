@@ -104,6 +104,13 @@ py-modules = [
     # v0.2.0 training bridge (Hermes-compatible export; Unsloth training;
     # LM Studio / Ollama deploy; A/B eval). See docs/TRAINING.md.
     "mnemosyne_train",
+    # v0.2.3 extended model + skill support (ported from Hermes Agent):
+    #   - tool-call parsers for text-embedded formats (Hermes/Qwen/
+    #     Mistral/Llama-3 tags) that unquantized local models emit
+    #     instead of structured tool_calls fields
+    #   - curated 11-skill library (fs / http / git / sqlite / shell)
+    "mnemosyne_tool_parsers",
+    "mnemosyne_skills_builtin",
 ]
 
 [tool.setuptools.package-data]
