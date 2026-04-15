@@ -175,6 +175,14 @@ class BrainConfig:
     goals_inject: bool = False
     goals_inject_limit: int = 5
 
+    # Training capture: when True, emit a `training_turn` telemetry event
+    # per successful turn containing the FULL system prompt, user message,
+    # assistant text, and tool_calls verbatim. mnemosyne_train.py reads
+    # these to produce Hermes-compatible ShareGPT trajectories. Off by
+    # default because it doubles on-disk event size; turn on for runs you
+    # intend to train on.
+    capture_for_training: bool = False
+
 
 # ---- brain ------------------------------------------------------------------
 
@@ -486,6 +494,24 @@ class Brain:
             )
             self._total_memory_writes += 1
 
+        # 5b. Training capture — full verbatim turn for mnemosyne_train.py
+        # to reconstruct Hermes-compatible ShareGPT trajectories later.
+        # Off by default; enabled via BrainConfig.capture_for_training.
+        if final_text and self.config.capture_for_training:
+            system_prompt = "\n\n".join(system_parts) if system_parts else ""
+            self._log(
+                "training_turn",
+                parent_event_id=parent_evt,
+                metadata={
+                    "system_prompt": system_prompt,
+                    "user_message": user_message,
+                    "assistant_text": final_text,
+                    "tool_calls": all_tool_calls,
+                    "model": self.config.backend.default_model,
+                    "provider": self.config.backend.provider,
+                },
+            )
+
         return BrainResponse(
             text=final_text,
             tool_calls=all_tool_calls,
@@ -558,6 +584,24 @@ class Brain:
                 metadata={"path": "inner_dialogue"},
             )
             self._total_memory_writes += 1
+
+        # Training capture (inner-dialogue path)
+        if final_text and self.config.capture_for_training:
+            self._log(
+                "training_turn",
+                parent_event_id=parent_evt,
+                metadata={
+                    "system_prompt": shared_context,
+                    "user_message": user_message,
+                    "assistant_text": final_text,
+                    "tool_calls": [],
+                    "model": self.config.backend.default_model,
+                    "provider": self.config.backend.provider,
+                    "path": "inner_dialogue",
+                    "personas": ["planner", "critic", "doer"]
+                                + (["evaluator"] if result.evaluator else []),
+                },
+            )
 
         return BrainResponse(
             text=final_text,

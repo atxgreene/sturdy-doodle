@@ -45,7 +45,7 @@ printf 'Branch:      %s\n' "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || ech
 printf 'Python:      %s\n' "$(python3 --version)"
 
 # ==============================================================================
-head1 '1/17  pip install -e . into a fresh venv'
+head1 '1/18  pip install -e . into a fresh venv'
 # ==============================================================================
 python3 -m venv "$DEMO_VENV"
 "$DEMO_VENV/bin/pip" install --quiet --upgrade pip
@@ -67,7 +67,7 @@ print('  ✓ all 7 library surfaces import cleanly')
 "
 
 # ==============================================================================
-head1 '2/17  Model providers — 19 backends detected'
+head1 '2/18  Model providers — 19 backends detected'
 # ==============================================================================
 export PATH="$DEMO_VENV/bin:$PATH"
 export MNEMOSYNE_PROJECTS_DIR="$DEMO_PROJECTS"
@@ -79,13 +79,13 @@ head2 'mnemosyne-models current   (no auth configured → falls back)'
 mnemosyne-models current
 
 # ==============================================================================
-head1 '3/17  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)'
+head1 '3/18  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)'
 # ==============================================================================
 head2 'environment-snapshot  (human-readable markdown)'
 environment-snapshot --projects-dir "$DEMO_PROJECTS" 2>&1 | head -30
 
 # ==============================================================================
-head1 '4/17  Memory layer — SQLite+FTS5 with ICMS 3-tier'
+head1 '4/18  Memory layer — SQLite+FTS5 with ICMS 3-tier'
 # ==============================================================================
 MEM_DB="$DEMO_PROJECTS/memory.db"
 
@@ -105,7 +105,7 @@ head2 'Stats:'
 mnemosyne-memory --db "$MEM_DB" stats
 
 # ==============================================================================
-head1 '5/17  Identity lock — regardless of underlying model, agent says Mnemosyne'
+head1 '5/18  Identity lock — regardless of underlying model, agent says Mnemosyne'
 # ==============================================================================
 head2 'Testing enforce_identity() against 5 slip patterns + 3 legitimate uses'
 "$DEMO_VENV/bin/python3" <<'PY'
@@ -159,7 +159,7 @@ mem.close()
 PY
 
 # ==============================================================================
-head1 '6/17  Skills — agentskills.io-compatible registry + self-improvement'
+head1 '6/18  Skills — agentskills.io-compatible registry + self-improvement'
 # ==============================================================================
 "$DEMO_VENV/bin/python3" <<'PY'
 import os, tempfile
@@ -200,7 +200,7 @@ print(f'  Parsed back:  name={loaded.name}  learned={loaded.learned}')
 PY
 
 # ==============================================================================
-head1 '7/17  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT'
+head1 '7/18  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT'
 # ==============================================================================
 head2 'Running examples/sweep_demo.py (8-point sweep, fake harness, ~6 seconds)'
 "$DEMO_VENV/bin/python3" "$SCRIPT_DIR/examples/sweep_demo.py" --projects-dir "$DEMO_PROJECTS" 2>&1 | tail -12
@@ -216,14 +216,14 @@ mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" pareto \
   --axes accuracy,latency_ms_avg --directions max,min --plot 2>&1 | head -30
 
 # ==============================================================================
-head1 '8/17  Aggregate statistics — per-tool call counts, latency percentiles'
+head1 '8/18  Aggregate statistics — per-tool call counts, latency percentiles'
 # ==============================================================================
 LATEST=$(mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" list --limit 1 | head -1 | awk '{print $1}')
 head2 "aggregate for $LATEST"
 mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" aggregate "$LATEST"
 
 # ==============================================================================
-head1 '9/17  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)'
+head1 '9/18  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)'
 # ==============================================================================
 head2 'mnemosyne-triage scan --window-days 30  (reads events.jsonl from our demo runs)'
 mnemosyne-triage --projects-dir "$DEMO_PROJECTS" scan --window-days 30 --top-n 5
@@ -235,7 +235,7 @@ head2 'First 20 lines of the report:'
 head -20 "$DEMO_PROJECTS"/health/*.md 2>/dev/null | sed 's/^/  /'
 
 # ==============================================================================
-head1 '10/17  Meta-Harness proposer — triage → proposals (rule-based v1)'
+head1 '10/18  Meta-Harness proposer — triage → proposals (rule-based v1)'
 # ==============================================================================
 head2 'Seed an identity-slip event so the proposer has something to react to'
 "$DEMO_VENV/bin/python3" <<'PY'
@@ -261,7 +261,7 @@ PROP=$(ls -1t "$DEMO_PROJECTS"/proposals/PROP-*.md 2>/dev/null | head -1)
 [ -n "$PROP" ] && head -25 "$PROP" | sed 's/^/  /'
 
 # ==============================================================================
-head1 '11/17  Dream consolidation — offline pattern extraction from L3 cold'
+head1 '11/18  Dream consolidation — offline pattern extraction from L3 cold'
 # ==============================================================================
 head2 'Seed 12 related L3 memories (user-preference pattern)'
 "$DEMO_VENV/bin/python3" <<'PY'
@@ -302,7 +302,7 @@ head2 'Dream report JSON:'
 ls "$DEMO_PROJECTS/dreams/" 2>/dev/null | sed 's/^/  /'
 
 # ==============================================================================
-head1 '12/17  Inner dialogue — Planner → Critic → Doer on tagged turns'
+head1 '12/18  Inner dialogue — Planner → Critic → Doer on tagged turns'
 # ==============================================================================
 "$DEMO_VENV/bin/python3" <<'PY'
 import os
@@ -353,7 +353,7 @@ store.close()
 PY
 
 # ==============================================================================
-head1 '13/17  Goal stack — persistent TODOs across sessions'
+head1 '13/18  Goal stack — persistent TODOs across sessions'
 # ==============================================================================
 head2 'Seed two goals via the CLI'
 mnemosyne-goals --projects-dir "$DEMO_PROJECTS" add "ship v0.2.0 release notes" --priority 1 --tags "release,docs" | sed 's/^/  /'
@@ -387,7 +387,7 @@ store.close()
 PY
 
 # ==============================================================================
-head1 '14/17  Apply-agent — closes the Meta-Harness loop'
+head1 '14/18  Apply-agent — closes the Meta-Harness loop'
 # ==============================================================================
 head2 'Mark one identity proposal as accepted, then run mnemosyne-apply'
 PROP=$(ls -1t "$DEMO_PROJECTS"/proposals/PROP-*identity*.md 2>/dev/null | head -1)
@@ -408,7 +408,7 @@ else
 fi
 
 # ==============================================================================
-head1 '15/17  MCP bridge — Mnemosyne skills exposed as Model Context Protocol tools'
+head1 '15/18  MCP bridge — Mnemosyne skills exposed as Model Context Protocol tools'
 # ==============================================================================
 head2 'mnemosyne-mcp serve reads JSON-RPC from stdin; we drive it inline'
 "$DEMO_VENV/bin/python3" <<'PY'
@@ -445,12 +445,69 @@ for line in out.getvalue().splitlines():
 PY
 
 # ==============================================================================
-head1 '16/17  Live dashboard (single frame via --once --plain)'
+head1 '16/18  Live dashboard (single frame via --once --plain)'
 # ==============================================================================
 bash "$SCRIPT_DIR/mnemosyne-dashboard.sh" --once --plain
 
 # ==============================================================================
-head1 '17/17  Test suite'
+head1 '17/18  Training bridge — telemetry → Hermes-compatible ShareGPT (LoRA ready)'
+# ==============================================================================
+head2 'Seed two successful training_turn events in a fresh run'
+"$DEMO_VENV/bin/python3" <<'PY'
+import json, os
+from pathlib import Path
+pd = Path(os.environ['MNEMOSYNE_PROJECTS_DIR'])
+rd = pd / 'experiments' / 'run_train_demo'
+rd.mkdir(parents=True, exist_ok=True)
+events = [
+    {'event_id': 'a1', 'event_type': 'turn_start', 'metadata': {'turn_number': 1}},
+    {'event_id': 'a2', 'event_type': 'training_turn', 'parent_event_id': 'a1',
+     'metadata': {'system_prompt': 'You are Mnemosyne.',
+                  'user_message': 'What is the capital of France?',
+                  'assistant_text': 'Paris is the capital of France.',
+                  'tool_calls': [], 'model': 'qwen3.5:9b', 'provider': 'ollama'}},
+    {'event_id': 'a3', 'event_type': 'turn_end', 'parent_event_id': 'a1', 'status': 'ok'},
+    {'event_id': 'b1', 'event_type': 'turn_start', 'metadata': {'turn_number': 2}},
+    {'event_id': 'b2', 'event_type': 'training_turn', 'parent_event_id': 'b1',
+     'metadata': {'system_prompt': 'You are Mnemosyne.',
+                  'user_message': 'Search my Obsidian vault for mnemosyne.',
+                  'assistant_text': 'Found 3 notes.',
+                  'tool_calls': [{'name': 'obsidian_search',
+                                   'args': {'query': 'mnemosyne'},
+                                   'result': {'matches': [{'path': 'a.md'}]}}],
+                  'model': 'qwen3.5:9b', 'provider': 'ollama'}},
+    {'event_id': 'b3', 'event_type': 'turn_end', 'parent_event_id': 'b1', 'status': 'ok'},
+]
+with (rd / 'events.jsonl').open('w') as f:
+    for e in events:
+        f.write(json.dumps(e) + '\n')
+print(f'  seeded {len(events)} events in {rd.name}')
+PY
+
+head2 'mnemosyne-train export   (Hermes-compatible ShareGPT)'
+mnemosyne-train export --projects-dir "$DEMO_PROJECTS" --json 2>&1 | head -15
+
+head2 'First exported trajectory — Hermes schema:'
+OUT=$(mnemosyne-train export --projects-dir "$DEMO_PROJECTS" --out /tmp/trajs.jsonl --json | python3 -c "import json,sys; print(json.load(sys.stdin)['out_path'])")
+head -1 "$OUT" | python3 -m json.tool | sed 's/^/  /' | head -40
+
+head2 'Schema check: Hermes-compatible keys present:'
+head -1 "$OUT" | python3 -c "
+import json, sys
+o = json.loads(sys.stdin.read())
+needed = ('prompt_index','conversations','metadata','completed','partial',
+          'api_calls','toolsets_used','tool_stats','tool_error_counts')
+missing = [k for k in needed if k not in o]
+print('  ✓ all Hermes keys present' if not missing else f'  ✗ missing: {missing}')
+print(f'  ✓ mnemo metadata: {list(k for k in o[\"metadata\"] if k.startswith(\"mnemo_\"))}')"
+
+head2 'mnemosyne-train deploy --to lmstudio --dry-run  (shows target path, no install)'
+mkdir -p /tmp/fake-adapter
+echo FAKE > /tmp/fake-adapter/model.gguf
+mnemosyne-train deploy /tmp/fake-adapter --to lmstudio --name mnemo-demo-v1 --dry-run --json 2>&1 | sed 's/^/  /'
+
+# ==============================================================================
+head1 '18/18  Test suite'
 # ==============================================================================
 head2 'bash test-harness.sh (integration)'
 bash "$SCRIPT_DIR/test-harness.sh" 2>&1 | tail -4
@@ -462,10 +519,11 @@ head2 'python3 tests/test_all.py (unit)'
 head1 'Demo complete.'
 # ==============================================================================
 printf '\n'
-printf 'All 17 sections exercised. Identity lock holds across slip attempts.\n'
+printf 'All 18 sections exercised. Identity lock holds across slip attempts.\n'
 printf 'Triage → proposer → apply closes the Meta-Harness loop end-to-end.\n'
 printf 'Dreams compress L3 cold memories; inner dialogue fires on hard turns.\n'
 printf 'Goal stack persists across sessions; MCP bridge exposes skills.\n'
+printf 'Training bridge emits Hermes-compatible ShareGPT JSONL.\n'
 printf 'Full pipeline produces real experiments in the fake PROJECTS_DIR and\n'
 printf 'the CLI tools read them back without sys.path shims. All tests pass.\n'
 printf '\n'

@@ -45,6 +45,7 @@ import mnemosyne_models as mdls  # noqa: E402
 import mnemosyne_proposer as proposer  # noqa: E402
 import mnemosyne_scengen as scengen  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
+import mnemosyne_train as train_mod  # noqa: E402
 import mnemosyne_triage as tri  # noqa: E402
 import scenario_runner as sr  # noqa: E402
 
@@ -2357,6 +2358,273 @@ def _():
                 _os.environ.pop("MNEMOSYNE_PROJECTS_DIR", None)
             else:
                 _os.environ["MNEMOSYNE_PROJECTS_DIR"] = saved
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_train — telemetry → LoRA bridge
+# =============================================================================
+
+def _mk_events_run(pd, run_id: str, events: list[dict]) -> Path:
+    """Create a minimal experiments/<run_id>/events.jsonl under pd."""
+    rd = pd / "experiments" / run_id
+    rd.mkdir(parents=True)
+    with (rd / "events.jsonl").open("w", encoding="utf-8") as f:
+        for e in events:
+            f.write(json.dumps(e) + "\n")
+    return rd
+
+
+@test("train: export builds Hermes-compatible schema from training_turn events")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        turn_start = {"event_id": "ev-1", "event_type": "turn_start",
+                       "parent_event_id": None, "metadata": {"turn_number": 1}}
+        training_turn = {"event_id": "ev-2", "event_type": "training_turn",
+                          "parent_event_id": "ev-1",
+                          "metadata": {
+                              "system_prompt": "You are Mnemosyne.",
+                              "user_message": "What is 2 + 2?",
+                              "assistant_text": "2 + 2 equals 4.",
+                              "tool_calls": [],
+                              "model": "qwen3.5:9b", "provider": "ollama",
+                          }}
+        turn_end = {"event_id": "ev-3", "event_type": "turn_end",
+                     "parent_event_id": "ev-1", "status": "ok"}
+        _mk_events_run(pd, "run_20260415-test-1",
+                        [turn_start, training_turn, turn_end])
+        out = pd / "out.jsonl"
+        summary = train_mod.export(projects_dir=pd, out=out,
+                                     allow_memory_fallback=False)
+        assert summary.trajectories_written == 1, summary
+        line = out.read_text(encoding="utf-8").strip()
+        obj = json.loads(line)
+        # Hermes schema keys
+        for k in ("prompt_index", "conversations", "metadata", "completed",
+                   "partial", "api_calls", "toolsets_used", "tool_stats",
+                   "tool_error_counts"):
+            assert k in obj, k
+        convs = obj["conversations"]
+        roles = [c["from"] for c in convs]
+        assert roles == ["system", "human", "gpt"], roles
+        assert "Mnemosyne" in convs[0]["value"]
+        assert obj["metadata"]["mnemo_run_id"] == "run_20260415-test-1"
+        assert obj["metadata"]["mnemo_model"] == "qwen3.5:9b"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("train: export filters identity-slip runs when --drop-identity-slips")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        events = [
+            {"event_id": "ev-1", "event_type": "turn_start",
+             "metadata": {"turn_number": 1}},
+            {"event_id": "ev-2", "event_type": "training_turn",
+             "parent_event_id": "ev-1",
+             "metadata": {"user_message": "hi", "assistant_text": "hello",
+                           "tool_calls": [], "model": "m", "provider": "p"}},
+            {"event_id": "ev-3", "event_type": "identity_slip_detected",
+             "parent_event_id": "ev-1", "status": "error"},
+            {"event_id": "ev-4", "event_type": "turn_end",
+             "parent_event_id": "ev-1", "status": "ok"},
+        ]
+        _mk_events_run(pd, "run-slip", events)
+        out = pd / "out.jsonl"
+        summary = train_mod.export(projects_dir=pd, out=out,
+                                     drop_identity_slips=True,
+                                     allow_memory_fallback=False)
+        assert summary.trajectories_written == 0
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("train: export falls back to memory.db when no training_turn events")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        # Seed memory.db with a Q:/A: row
+        store = mm.MemoryStore(path=pd / "memory.db")
+        store.write(content="Q: what day is it\nA: Friday",
+                     source="conversation", kind="turn", tier=mm.L2_WARM)
+        store.close()
+        # No experiments/ dir — force fallback
+        out = pd / "out.jsonl"
+        summary = train_mod.export(projects_dir=pd, out=out,
+                                     allow_memory_fallback=True)
+        assert summary.fallback_to_memory_db is True
+        assert summary.trajectories_written == 1
+        obj = json.loads(out.read_text(encoding="utf-8").strip())
+        roles = [c["from"] for c in obj["conversations"]]
+        assert roles == ["human", "gpt"]
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("train: compress no-op when under target_max_tokens")
+def _():
+    traj = {"conversations": [
+        {"from": "system", "value": "short"},
+        {"from": "human",  "value": "hi"},
+        {"from": "gpt",    "value": "hello"},
+    ]}
+    out = train_mod.compress_one(traj, target_max_tokens=10_000)
+    assert "compression_metrics" not in out
+    assert out["conversations"] == traj["conversations"]
+
+
+@test("train: compress replaces middle turns above target")
+def _():
+    big = "word " * 500  # ~2500 chars → ~625 tokens each
+    traj = {"conversations": [
+        {"from": "system", "value": "system preamble"},
+        {"from": "human",  "value": big},
+        {"from": "gpt",    "value": big},
+        {"from": "human",  "value": big},
+        {"from": "gpt",    "value": big},
+        {"from": "human",  "value": big},
+        {"from": "gpt",    "value": "final answer here"},
+    ]}
+    out = train_mod.compress_one(traj, target_max_tokens=500,
+                                   protect_last_n_turns=2)
+    assert out.get("compression_metrics", {}).get("was_compressed") is True
+    # last 2 turns preserved
+    assert out["conversations"][-1]["value"] == "final answer here"
+    # a summary turn should appear
+    assert any(c["value"].startswith("[CONTEXT SUMMARY")
+                 for c in out["conversations"])
+
+
+@test("train: compress preserves last N turns verbatim")
+def _():
+    t = [{"from": "human" if i % 2 else "gpt", "value": "X" * 2000}
+          for i in range(10)]
+    traj = {"conversations": t}
+    out = train_mod.compress_one(traj, target_max_tokens=100,
+                                   protect_last_n_turns=3)
+    # The last 3 turns should match exactly
+    assert out["conversations"][-3:] == t[-3:]
+
+
+@test("train: deploy lmstudio --dry-run writes nothing and returns target path")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        adapter = pd / "adapter"
+        adapter.mkdir()
+        (adapter / "model.gguf").write_bytes(b"\x00")
+        os.environ["LMSTUDIO_MODELS_DIR"] = str(pd / "lmstudio")
+        try:
+            r = train_mod.deploy(adapter, to="lmstudio", name="unit-test",
+                                   dry_run=True)
+        finally:
+            os.environ.pop("LMSTUDIO_MODELS_DIR", None)
+        assert r["mode"] == "lmstudio"
+        assert r["dry_run"] is True
+        assert "unit-test" in r["would_copy_to"]
+        # Nothing was actually copied
+        assert not (pd / "lmstudio").exists()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("train: deploy lmstudio writes gguf to publisher/name/ path")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        adapter = pd / "adapter"
+        adapter.mkdir()
+        (adapter / "model.gguf").write_bytes(b"binary-gguf")
+        os.environ["LMSTUDIO_MODELS_DIR"] = str(pd / "lmstudio")
+        try:
+            r = train_mod.deploy(adapter, to="lmstudio", name="my-lora",
+                                   dry_run=False)
+        finally:
+            os.environ.pop("LMSTUDIO_MODELS_DIR", None)
+        dest = Path(r["path"])
+        assert dest.exists(), r
+        assert dest.read_bytes() == b"binary-gguf"
+        assert dest.parent == pd / "lmstudio" / "mnemosyne" / "my-lora"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("train: deploy ollama --dry-run returns Modelfile content")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        adapter = pd / "adapter"
+        adapter.mkdir()
+        (adapter / "model.gguf").write_bytes(b"\x00")
+        r = train_mod.deploy(adapter, to="ollama", name="ollama-lora",
+                               base_model="qwen3.5:9b", dry_run=True)
+        assert r["mode"] == "ollama"
+        assert "FROM qwen3.5:9b" in r["modelfile"]
+        assert "ADAPTER" in r["modelfile"]
+        # Dry run writes nothing
+        assert not (adapter / "Modelfile").exists()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("train: _dominates on accuracy-max + latency-min")
+def _():
+    directions = {"accuracy": "max", "latency_ms_avg": "min"}
+    better = {"accuracy": 0.9, "latency_ms_avg": 100.0}
+    worse  = {"accuracy": 0.7, "latency_ms_avg": 150.0}
+    assert train_mod._dominates(better, worse, directions)
+    assert not train_mod._dominates(worse, better, directions)
+    # Tradeoff: one axis better, other worse → neither dominates
+    tradeoff = {"accuracy": 0.95, "latency_ms_avg": 200.0}
+    assert not train_mod._dominates(tradeoff, better, directions)
+    assert not train_mod._dominates(better, tradeoff, directions)
+
+
+@test("train: eval_ab runs both harnesses and returns per-scenario delta")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        # Tiny scenarios file
+        sc = pd / "tiny.jsonl"
+        sc.write_text(
+            json.dumps({"id": "s1", "prompt": "capital of france?",
+                          "expected_contains": ["Paris"]}) + "\n"
+            + json.dumps({"id": "s2", "prompt": "2+2?",
+                           "expected_contains": ["4"]}) + "\n",
+            encoding="utf-8",
+        )
+
+        def base_chat(messages, **kw):
+            # Base gets both wrong
+            return {"status": "ok", "text": "I don't know.", "tool_calls": []}
+
+        def adapted_chat(messages, **kw):
+            # Adapted nails them
+            prompt = messages[0]["content"].lower()
+            if "france" in prompt:
+                return {"status": "ok", "text": "Paris is the capital of France.",
+                        "tool_calls": []}
+            return {"status": "ok", "text": "The answer is 4.", "tool_calls": []}
+
+        report = train_mod.eval_ab(
+            base={"provider": "ollama", "model": "base"},
+            adapted={"provider": "lmstudio", "model": "adapted"},
+            scenarios_paths=[sc],
+            projects_dir=pd,
+            base_chat_fn=base_chat,
+            adapted_chat_fn=adapted_chat,
+        )
+        assert report["base"]["metrics"]["passed"] == 0
+        assert report["adapted"]["metrics"]["passed"] == 2
+        assert report["delta"]["passed"] == 2
+        # Base should never dominate adapted when adapted has higher accuracy
+        assert report["pareto"]["base_dominates_adapted"] is False
+        # Per-scenario: both scenarios should show delta=+1
+        deltas = {p["id"]: p["delta"] for p in report["per_scenario"]}
+        assert deltas == {"s1": 1, "s2": 1}
     finally:
         shutil.rmtree(pd)
 

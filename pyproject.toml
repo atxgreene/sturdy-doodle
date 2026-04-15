@@ -29,6 +29,17 @@ dependencies = []
 [project.optional-dependencies]
 # Only for developers working on this repo. No runtime users need these.
 dev = []
+# Training bridge (mnemosyne-train). Only needed when you actually run
+# `mnemosyne-train train`. Export, compress, deploy, eval all work
+# without these.
+train = [
+    "unsloth>=2025.11",
+    "datasets>=3.0",
+    "transformers>=4.45",
+    "trl>=0.12",
+    "peft>=0.13",
+    "accelerate>=1.0",
+]
 
 [project.urls]
 Repository = "https://github.com/atxgreene/sturdy-doodle"
@@ -54,6 +65,7 @@ mnemosyne-scengen      = "mnemosyne_scengen:_main"
 mnemosyne-goals        = "mnemosyne_goals:_main"
 mnemosyne-mcp          = "mnemosyne_mcp:_main"
 mnemosyne-serve        = "mnemosyne_serve:_main"
+mnemosyne-train        = "mnemosyne_train:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -89,6 +101,9 @@ py-modules = [
     "mnemosyne_scengen",
     "mnemosyne_goals",
     "mnemosyne_mcp",
+    # v0.2.0 training bridge (Hermes-compatible export; Unsloth training;
+    # LM Studio / Ollama deploy; A/B eval). See docs/TRAINING.md.
+    "mnemosyne_train",
 ]
 
 [tool.setuptools.package-data]

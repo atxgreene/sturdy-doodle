@@ -4,6 +4,35 @@ All notable changes to the Mnemosyne harness deployment repo. The format is loos
 
 ## [0.2.0] — 2026-04-15 — v1.2 rigor pass + architectural primitives
 
+### v1.2.1 — training bridge (telemetry → LoRA → LM Studio/Ollama)
+
+New module + five-subcommand CLI closes the Hermes / Meta-Harness loop
+end to end:
+
+- `mnemosyne_train.py` — `export` (telemetry → Hermes-compatible
+  ShareGPT JSONL), `compress` (stdlib port of Hermes's
+  `trajectory_compressor`), `train` (shells out to Unsloth),
+  `deploy` (LM Studio or Ollama), `eval` (A/B base vs. adapted,
+  Pareto delta).
+- `_train_unsloth.py` — subprocess wrapper loading Unsloth only when
+  `mnemosyne-train train` actually runs. Heavy deps never touch the
+  core import path.
+- `docs/TRAINING.md` — methodology, minimum dataset sizing, chat-
+  template warnings, honest caveats about what LoRA can and cannot do.
+- `BrainConfig.capture_for_training=True` — emits a `training_turn`
+  telemetry event per successful turn with the full verbatim prompt,
+  response, and tool calls. Used by `export` as source of truth.
+  Fallback to memory.db Q:/A: reconstruction when absent (truncated).
+- `[project.optional-dependencies] train = [unsloth, datasets,
+  transformers, trl, peft, accelerate]` — opt-in install.
+
+Output format is a **strict superset** of Hermes's
+`batch_runner.py` schema. Mnemosyne-specific metadata lives under
+`metadata.mnemo_*`; trainers ignore unknown keys. Interop both
+directions with the Hermes trajectory ecosystem.
+
+15th console script: `mnemosyne-train`. Tests: 145 → 156, all green.
+
 Cumulative on top of `main` (`07d2724`). Branch: `claude/setup-mnemosyne-consciousness-NZqQE`.
 
 ### v1.2 rigor pass (this commit)
