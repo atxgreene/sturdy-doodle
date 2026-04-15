@@ -200,7 +200,7 @@ def run(
         except KeyboardInterrupt:
             ht.mark_run_failed(run_id, error="KeyboardInterrupt", projects_dir=projects_dir)
             if progress:
-                print(f"  ! interrupted — stopping sweep", file=sys.stderr)
+                print("  ! interrupted — stopping sweep", file=sys.stderr)
             raise
         except Exception as exc:  # noqa: BLE001 — we intentionally catch all
             ht.mark_run_failed(

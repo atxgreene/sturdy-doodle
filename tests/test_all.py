@@ -314,7 +314,7 @@ def _():
     pd = _tmp_projects_dir()
     try:
         run_id = ht.create_run(model="m", projects_dir=pd)
-        with ht.TelemetrySession(run_id, projects_dir=pd) as sess:
+        with ht.TelemetrySession(run_id, projects_dir=pd):
             pass
         events = [json.loads(l) for l in
                   (pd / "experiments" / run_id / "events.jsonl").read_text().splitlines()
@@ -1272,7 +1272,7 @@ def _():
     pd = _tmp_projects_dir()
     try:
         # Point projects_dir at our temp dir for the learn_skill call
-        import os
+        # (os is imported at module top)
         orig = os.environ.get("MNEMOSYNE_PROJECTS_DIR")
         os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
         try:

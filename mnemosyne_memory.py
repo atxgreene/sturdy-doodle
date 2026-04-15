@@ -92,7 +92,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 # Tier constants — match eternal-context's ICMS L1/L2/L3
@@ -438,7 +438,6 @@ def _fts5_escape(query: str) -> str:
 
 def _main(argv: list[str] | None = None) -> int:
     import argparse
-    import sys
 
     p = argparse.ArgumentParser(
         prog="mnemosyne_memory",

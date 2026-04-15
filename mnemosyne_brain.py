@@ -73,7 +73,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import mnemosyne_identity as identity
 import mnemosyne_memory as mm

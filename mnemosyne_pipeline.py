@@ -390,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
     else:
         print()
-        print(f"=== Pipeline Report ===")
+        print("=== Pipeline Report ===")
         print(f"Runs: {report['runs_completed']}/{report['runs_total']} completed")
         print(f"Elapsed: {report['elapsed_s']}s")
         print(f"Frontier: {report['frontier_size']} run(s)")

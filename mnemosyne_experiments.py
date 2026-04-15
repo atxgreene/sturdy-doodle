@@ -291,7 +291,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
     a_dir = ht.run_path(args.run_a, Path(args.projects_dir) if args.projects_dir else None)
     b_dir = ht.run_path(args.run_b, Path(args.projects_dir) if args.projects_dir else None)
     if not a_dir.is_dir() or not b_dir.is_dir():
-        print(f"diff: one or both runs not found", file=sys.stderr)
+        print("diff: one or both runs not found", file=sys.stderr)
         return 3
 
     a_meta = json.loads((a_dir / "metadata.json").read_text(encoding="utf-8"))
@@ -569,7 +569,7 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
     for et in sorted(event_type_counts):
         print(f"  {et:<14} {event_type_counts[et]}")
     print()
-    print(f"## overall tool_call stats")
+    print("## overall tool_call stats")
     print(f"  calls:        {all_tool_calls}")
     print(f"  ok:           {all_ok}")
     print(f"  errors:       {all_errors}")
@@ -579,7 +579,7 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
         print(f"  duration_ms:  avg={d['avg']:.1f}  p50={d['p50']:.1f}  "
               f"p95={d['p95']:.1f}  p99={d['p99']:.1f}  total={d['total']:.1f}")
     print()
-    print(f"## per-tool")
+    print("## per-tool")
     print(f"  {'tool':<28}  {'calls':>6}  {'ok':>6}  {'err':>6}  "
           f"{'rate':>7}  {'avg_ms':>8}  {'p95_ms':>8}")
     for tool, v in stats.items():

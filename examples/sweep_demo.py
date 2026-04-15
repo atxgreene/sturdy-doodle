@@ -61,7 +61,6 @@ def make_fake_harness(params: dict):
     # long-context and tool-use scenarios; higher temperature reduces
     # accuracy; low retrieval_limit hurts tool-use scenarios.
     is_long_context = "gemma4" in model
-    base_accuracy = 0.88 if is_long_context else 0.80
     base_latency = 900.0 if is_long_context else 1300.0
 
     rng = random.Random(f"{model}-{retrieval_limit}-{temperature}")
@@ -193,7 +192,7 @@ def main() -> int:
     print(f"  {env_hint}./mnemosyne-experiments.py top-k 3 --metric accuracy")
     print(f"  {env_hint}./mnemosyne-experiments.py top-k 3 --metric latency_ms_avg --direction min")
     print(f"  {env_hint}./mnemosyne-experiments.py pareto \\")
-    print(f"      --axes accuracy,latency_ms_avg --directions max,min --plot")
+    print("      --axes accuracy,latency_ms_avg --directions max,min --plot")
     print(f"  {env_hint}./mnemosyne-experiments.py aggregate {run_ids[0]}")
     return 0
 

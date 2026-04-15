@@ -406,7 +406,7 @@ def record_learned_skill(
     fm: list[str] = ["---"]
     fm.append(f"name: {name}")
     fm.append(f"description: {description}")
-    fm.append(f"learned: true")
+    fm.append("learned: true")
     fm.append(f"learned_at: {_utcnow()}")
     fm.append("invocation: subprocess")
     fm.append(f"command: {command}")

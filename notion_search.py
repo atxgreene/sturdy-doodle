@@ -54,7 +54,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Iterable
+from typing import Any
 
 
 NOTION_API = "https://api.notion.com/v1"
