@@ -45,6 +45,8 @@ import mnemosyne_models as mdls  # noqa: E402
 import mnemosyne_proposer as proposer  # noqa: E402
 import mnemosyne_scengen as scengen  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
+import mnemosyne_batch as batch_mod  # noqa: E402
+import mnemosyne_datagen as datagen  # noqa: E402
 import mnemosyne_skills_builtin as sbi  # noqa: E402
 import mnemosyne_tool_parsers as tp  # noqa: E402
 import mnemosyne_train as train_mod  # noqa: E402
@@ -2858,6 +2860,175 @@ def _():
                               load_builtins=False,
                               projects_dir=_tmp_projects_dir())
     assert "fs_read" not in reg2.names()
+
+
+# =============================================================================
+#  mnemosyne_datagen + mnemosyne_batch
+# =============================================================================
+
+@test("datagen: cartesian expansion across multiple variables")
+def _():
+    out = datagen.generate_prompts({
+        "templates": ["What is the capital of {country}?"],
+        "vars": {"country": ["France", "Spain", "Germany"]},
+        "tags": ["geo"],
+        "id_prefix": "g",
+    })
+    assert len(out) == 3
+    assert out[0]["prompt"] == "What is the capital of France?"
+    assert out[0]["tags"] == ["geo"]
+    assert out[0]["id"].startswith("g-")
+
+
+@test("datagen: limit caps output count")
+def _():
+    out = datagen.generate_prompts({
+        "templates": ["q1?", "q2?"],
+        "vars": {"x": ["a", "b", "c"]},
+        "limit": 4,
+    })
+    assert len(out) == 4
+
+
+@test("datagen: empty templates returns nothing")
+def _():
+    assert datagen.generate_prompts({"templates": []}) == []
+    assert datagen.generate_prompts({}) == []
+
+
+@test("datagen: to_scenarios attaches expected_contains from answer key")
+def _():
+    prompts = datagen.generate_prompts({
+        "templates": ["What is the capital of {country}?"],
+        "vars": {"country": ["France", "Spain"]},
+    })
+    answer_key = {"capital of": ["Paris", "Madrid"]}
+    scenarios = datagen.to_scenarios(prompts, answer_key)
+    assert all("expected_contains" in s for s in scenarios)
+    assert scenarios[0]["expected_contains"] == ["Paris", "Madrid"]
+
+
+@test("batch: load_prompts handles strings and dicts")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        f = pd / "prompts.jsonl"
+        f.write_text(
+            '"plain string prompt"\n'
+            '{"id": "p1", "prompt": "dict prompt", "tags": ["t1"]}\n'
+            "# comment ignored\n"
+            "\n",
+            encoding="utf-8",
+        )
+        prompts = batch_mod.load_prompts(f)
+        assert len(prompts) == 2
+        assert prompts[0].text == "plain string prompt"
+        assert prompts[0].id.startswith("p-")
+        assert prompts[1].id == "p1"
+        assert prompts[1].tags == ["t1"]
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("batch: run_batch executes prompts in parallel + summary correct")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        prompts = [
+            batch_mod.Prompt(id=f"q-{i}", text=f"prompt {i}")
+            for i in range(8)
+        ]
+
+        def fake_chat(messages, **kw):
+            return {"status": "ok", "text": "ok", "tool_calls": []}
+
+        def factory(session):
+            return br.Brain(
+                memory=mm.MemoryStore(telemetry=session,
+                                       path=pd / "mem.db"),
+                skills=sk.SkillRegistry(),
+                telemetry=session,
+                chat_fn=fake_chat,
+                config=br.BrainConfig(adapt_to_context=False,
+                                       inject_env_snapshot=False,
+                                       capture_for_training=True),
+            )
+
+        summary = batch_mod.run_batch(
+            prompts, brain_factory=factory, workers=4, projects_dir=pd,
+            tags=["unit-test"], progress_every=1000,
+        )
+        assert summary.prompts_total == 8
+        assert summary.prompts_completed == 8
+        assert summary.prompts_failed == 0
+        assert summary.duration_s > 0
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("batch: run_batch resume skips already-completed prompts")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        prompts = [batch_mod.Prompt(id=f"r-{i}", text=f"p{i}") for i in range(4)]
+
+        def fake_chat(messages, **kw):
+            return {"status": "ok", "text": "ok", "tool_calls": []}
+
+        def factory(session):
+            return br.Brain(
+                memory=mm.MemoryStore(telemetry=session, path=pd / "m.db"),
+                skills=sk.SkillRegistry(), telemetry=session,
+                chat_fn=fake_chat,
+                config=br.BrainConfig(adapt_to_context=False,
+                                       inject_env_snapshot=False,
+                                       capture_for_training=True),
+            )
+
+        # First pass: complete 4 prompts
+        s1 = batch_mod.run_batch(prompts, brain_factory=factory,
+                                   workers=2, projects_dir=pd)
+        # The resume path needs to look at the SAME run dir to skip.
+        # Verify the helper finds completed IDs correctly.
+        rd = ht.run_path(s1.run_id, pd)
+        done = batch_mod.load_completed_ids(rd / "events.jsonl")
+        assert done == {"r-0", "r-1", "r-2", "r-3"}, done
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("batch: run_batch counts retries on transient errors")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        attempts: dict[str, int] = {}
+
+        def flaky_chat(messages, **kw):
+            user = messages[-1]["content"]
+            attempts[user] = attempts.get(user, 0) + 1
+            if attempts[user] < 2:
+                raise RuntimeError("HTTP 503 service unavailable")
+            return {"status": "ok", "text": "recovered", "tool_calls": []}
+
+        def factory(session):
+            return br.Brain(
+                memory=mm.MemoryStore(telemetry=session, path=pd / "m.db"),
+                skills=sk.SkillRegistry(), telemetry=session,
+                chat_fn=flaky_chat,
+                config=br.BrainConfig(adapt_to_context=False,
+                                       inject_env_snapshot=False),
+            )
+
+        prompts = [batch_mod.Prompt(id="x1", text="hello")]
+        summary = batch_mod.run_batch(
+            prompts, brain_factory=factory, workers=1, projects_dir=pd,
+            max_retries=3, retry_backoff_s=0.001,
+        )
+        assert summary.prompts_completed == 1
+        assert summary.prompts_failed == 0
+        assert attempts["hello"] == 2  # 1 failure + 1 success
+    finally:
+        shutil.rmtree(pd)
 
 
 # =============================================================================

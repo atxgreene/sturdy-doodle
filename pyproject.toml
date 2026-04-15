@@ -66,6 +66,8 @@ mnemosyne-goals        = "mnemosyne_goals:_main"
 mnemosyne-mcp          = "mnemosyne_mcp:_main"
 mnemosyne-serve        = "mnemosyne_serve:_main"
 mnemosyne-train        = "mnemosyne_train:_main"
+mnemosyne-batch        = "mnemosyne_batch:_main"
+mnemosyne-datagen      = "mnemosyne_datagen:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -111,6 +113,11 @@ py-modules = [
     #   - curated 11-skill library (fs / http / git / sqlite / shell)
     "mnemosyne_tool_parsers",
     "mnemosyne_skills_builtin",
+    # v0.2.4: parallel prompt → trajectory runner + synthetic prompt
+    # generator. Together they form the synthetic-data pipeline that
+    # feeds mnemosyne-train.
+    "mnemosyne_batch",
+    "mnemosyne_datagen",
 ]
 
 [tool.setuptools.package-data]
