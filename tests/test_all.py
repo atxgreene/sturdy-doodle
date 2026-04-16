@@ -47,6 +47,7 @@ import mnemosyne_scengen as scengen  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
 import mnemosyne_avatar as avatar_mod  # noqa: E402
 import mnemosyne_permissions as perm_mod  # noqa: E402
+import mnemosyne_predictions as pred_mod  # noqa: E402
 import mnemosyne_resolver as resolver_mod  # noqa: E402
 import mnemosyne_batch as batch_mod  # noqa: E402
 import mnemosyne_datagen as datagen  # noqa: E402
@@ -4253,6 +4254,160 @@ def _():
     finally:
         shutil.rmtree(proj)
         shutil.rmtree(target)
+
+
+# =============================================================================
+#  mnemosyne_predictions — self-calibration
+# =============================================================================
+
+@test("predictions: score_events computes calibration correctly")
+def _():
+    events = [
+        {"event_type": "prediction",
+         "metadata": {"prediction_id": "a", "claim": "x",
+                       "confidence": 0.9, "kind": "tool_success",
+                       "emitted_at": "2026-04-15T12:00:00.000000Z"}},
+        {"event_type": "outcome",
+         "metadata": {"prediction_id": "a",
+                       "actual_correctness": 0.0}},
+        {"event_type": "prediction",
+         "metadata": {"prediction_id": "b", "claim": "y",
+                       "confidence": 0.8, "kind": "tool_success",
+                       "emitted_at": "2026-04-15T12:01:00.000000Z"}},
+        {"event_type": "outcome",
+         "metadata": {"prediction_id": "b",
+                       "actual_correctness": 1.0}},
+    ]
+    r = pred_mod.score_events(events)
+    assert r.predictions_total == 2
+    assert r.predictions_resolved == 2
+    assert r.overconfident_wrong == 1   # the first one
+    # |0.9-0| = 0.9, |0.8-1| = 0.2  →  mean 0.55  →  calibration 0.45
+    assert abs(r.calibration - 0.45) < 0.01
+
+
+@test("predictions: unresolved predictions within horizon are pending")
+def _():
+    events = [
+        {"event_type": "prediction",
+         "metadata": {"prediction_id": "a", "claim": "x",
+                       "confidence": 0.5, "horizon_seconds": 3600,
+                       "emitted_at": "2026-04-15T12:00:00.000000Z"}},
+    ]
+    r = pred_mod.score_events(events,
+                                now_iso="2026-04-15T12:10:00.000000Z")
+    assert r.predictions_pending == 1
+    assert r.predictions_resolved == 0
+
+
+@test("predictions: expired predictions score as 0.5 (uninformative)")
+def _():
+    events = [
+        {"event_type": "prediction",
+         "metadata": {"prediction_id": "a", "claim": "x",
+                       "confidence": 0.9, "horizon_seconds": 60,
+                       "emitted_at": "2026-04-15T12:00:00.000000Z"}},
+    ]
+    r = pred_mod.score_events(events,
+                                now_iso="2026-04-15T13:00:00.000000Z")
+    assert r.predictions_expired == 1
+    # conf=0.9 vs scoring=0.5 → error=0.4 → calibration=0.6
+    assert abs(r.calibration - 0.6) < 0.01
+
+
+@test("predictions: calibration_trait returns None with fewer than 3 resolved")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        # Seed only one prediction+outcome pair
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            s.log("prediction", metadata={"prediction_id": "x",
+                                             "confidence": 0.8,
+                                             "claim": "w",
+                                             "emitted_at": "2026-04-16T00:00:00.000000Z"})
+            s.log("outcome", metadata={"prediction_id": "x",
+                                          "actual_correctness": 1.0})
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+        t = pred_mod.calibration_trait(pd)
+        assert t is None
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("predictions: calibration_trait returns value with 3+ resolved")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            for i, corr in enumerate([1.0, 0.5, 0.8]):
+                s.log("prediction", metadata={
+                    "prediction_id": f"p{i}", "confidence": 0.7,
+                    "claim": "c", "emitted_at": "2026-04-16T00:00:00.000000Z"})
+                s.log("outcome", metadata={
+                    "prediction_id": f"p{i}",
+                    "actual_correctness": corr})
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+        t = pred_mod.calibration_trait(pd)
+        assert t is not None and 0.0 <= t <= 1.0
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("predict/observe emit linked events through TelemetrySession")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            pid = pred_mod.predict(s, claim="will succeed",
+                                     confidence=0.9, kind="tool_success",
+                                     horizon_seconds=60)
+            assert pid.startswith("pred_")
+            pred_mod.observe(s, prediction_id=pid,
+                              actual="succeeded",
+                              actual_correctness=1.0)
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+        # Round-trip through score_run
+        rd = ht.run_path(rid, pd)
+        r = pred_mod.score_run(rd)
+        assert r.predictions_resolved == 1
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("triage: prediction_overconfident cluster fires on high-conf-wrong pair")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            for i in range(3):
+                s.log("prediction", metadata={
+                    "prediction_id": f"p{i}", "confidence": 0.9,
+                    "claim": "c", "kind": "tool_success"})
+                s.log("outcome", metadata={
+                    "prediction_id": f"p{i}",
+                    "actual_correctness": 0.0})
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+        report = tri.run_triage(projects_dir=pd, window_days=30)
+        cluster_types = {c["event_type"] for c in report.clusters}
+        assert "prediction_overconfident" in cluster_types, cluster_types
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar: calibration trait appears in state dict (null when no signal)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        state = avatar_mod.compute_state(projects_dir=pd, use_cache=False)
+        assert "calibration" in state
+        # No predictions yet → null
+        assert state["calibration"] is None
+    finally:
+        shutil.rmtree(pd)
 
 
 # =============================================================================

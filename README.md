@@ -1,6 +1,8 @@
 # Mnemosyne
 
-**Local-first LLM agent framework. Stdlib only. One pip install away.**
+**The cognitive substrate for local-first agents. Stdlib only. One pip install away.**
+
+*Operational definition in [`docs/VISION.md`](./docs/VISION.md); live capability checklist in [`docs/COGNITIVE_OS.md`](./docs/COGNITIVE_OS.md) — we don't claim "cognitive OS" until it's measurable.*
 
 ![dashboard](docs/dashboard.png)
 

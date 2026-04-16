@@ -203,6 +203,8 @@ def cluster_events(
         "model_call_errors": 0,
         "no_tool_dispatched": 0,
         "unknown_tool_called": 0,
+        "predictions_total": 0,
+        "prediction_overconfident": 0,
         "runs": set(),
         "models": {},
     }
@@ -219,6 +221,11 @@ def cluster_events(
         )
     except Exception:
         _known_tool_names = set()
+
+    # Index for post-pass calibration cluster synthesis. Populated by
+    # the `prediction` + `outcome` branches in the main loop, consumed
+    # after the loop completes.
+    _pred_index: dict[str, dict[str, Any]] = {}
 
     for run_id, ev in events_iter:
         stats["total_events"] += 1
@@ -302,6 +309,26 @@ def cluster_events(
                 # it's an info-grade signal, not a hard failure.
         elif et == "identity_slip_detected":
             stats["identity_slips"] += 1
+        elif et == "prediction":
+            # Index for the post-pass calibration cluster synthesis
+            md = ev.get("metadata") or {}
+            pid = md.get("prediction_id")
+            if pid:
+                _pred_index[pid] = {
+                    "confidence": md.get("confidence", 0.5),
+                    "kind": md.get("kind", "generic"),
+                    "claim": md.get("claim", ""),
+                    "run_id": run_id,
+                    "ts": ev.get("timestamp_utc"),
+                }
+        elif et == "outcome":
+            md = ev.get("metadata") or {}
+            pid = md.get("prediction_id")
+            correctness = md.get("actual_correctness")
+            if (pid and isinstance(correctness, (int, float))
+                    and pid in _pred_index):
+                _pred_index[pid]["correctness"] = correctness
+                _pred_index[pid]["outcome_ts"] = ev.get("timestamp_utc")
 
         # Count models seen (from model_call events' args or metadata)
         args = ev.get("args") or {}
@@ -339,6 +366,60 @@ def cluster_events(
                 c.first_seen_utc = ts
             if c.last_seen_utc is None or ts > c.last_seen_utc:
                 c.last_seen_utc = ts
+
+    # Post-pass: synthesize prediction_overconfident clusters from
+    # the pred/outcome index collected during the loop. A prediction
+    # is "overconfident-wrong" when confidence ≥ 0.8 and the paired
+    # outcome showed correctness ≤ 0.3. Grouped by `kind` so tool-use
+    # miscalibration is separable from plan-resolution miscalibration.
+    stats["predictions_total"] = len(_pred_index)
+    overconf_by_kind: dict[str, list[dict[str, Any]]] = {}
+    for pid, rec in _pred_index.items():
+        conf = rec.get("confidence", 0.5)
+        corr = rec.get("correctness")
+        if corr is None:
+            continue   # unresolved, don't score
+        if conf >= 0.8 and corr <= 0.3:
+            kind = rec.get("kind", "generic")
+            overconf_by_kind.setdefault(kind, []).append(rec)
+
+    for kind, events_in_cluster in overconf_by_kind.items():
+        if not events_in_cluster:
+            continue
+        stats["prediction_overconfident"] += len(events_in_cluster)
+        stats["error_events"] += len(events_in_cluster)
+        cid = _cluster_id_for("prediction_overconfident", kind, None)
+        c = clusters.get(cid)
+        if c is None:
+            c = Cluster(
+                cluster_id=cid,
+                event_type="prediction_overconfident",
+                tool=kind,
+                error_type=None,
+                first_seen_utc=events_in_cluster[0].get("ts"),
+            )
+            clusters[cid] = c
+        for rec in events_in_cluster:
+            synth = {
+                "event_type": "prediction_overconfident",
+                "status": "error",
+                "tool": kind,
+                "error": {"type": "OverconfidentWrong",
+                          "message":
+                              f"confidence={rec.get('confidence'):.2f} "
+                              f"correctness={rec.get('correctness'):.2f}"},
+                "metadata": {"claim": rec.get("claim", ""),
+                             "prediction_id": rec.get("run_id", "")},
+                "timestamp_utc": rec.get("outcome_ts") or rec.get("ts"),
+            }
+            c.events.append(synth)
+            c.runs.add(rec.get("run_id", ""))
+            ts = synth["timestamp_utc"]
+            if ts:
+                if c.first_seen_utc is None or ts < c.first_seen_utc:
+                    c.first_seen_utc = ts
+                if c.last_seen_utc is None or ts > c.last_seen_utc:
+                    c.last_seen_utc = ts
 
     stats["runs"] = len(stats["runs"])  # convert to count
     return list(clusters.values()), stats
@@ -387,6 +468,11 @@ def severity_score(cluster: Cluster, stats: dict[str, Any]) -> dict[str, Any]:
         # cluster of these means the resolver layer is failing —
         # less severe than a hard error but worth flagging.
         blast = 0.35
+    elif cluster.event_type == "prediction_overconfident":
+        # Calibration signal: agent made high-confidence claims that
+        # were wrong. Worse than low-confidence wrongness because it
+        # suggests the model's confidence is decoupled from reality.
+        blast = 0.55
 
     # fix_age: stale clusters that keep firing are worse than new ones (placeholder;
     # real implementation needs a report DB to know "previously reported and not

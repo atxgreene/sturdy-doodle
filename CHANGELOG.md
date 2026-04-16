@@ -2,6 +2,67 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.6.0] — 2026-04-16 — self-calibration + cognitive-OS framing
+
+The fourth property of the cognitive-OS checklist (`docs/VISION.md`)
+flips from ✗ to ✓: **self-calibration**. The runtime now emits
+predictions as first-class events, observes outcomes, and scores
+calibration as a measurable agent trait.
+
+**New module `mnemosyne_predictions.py`**
+  - `predict(telemetry, claim, confidence, kind, horizon_*)` emits a
+    `prediction` event with a UUID `prediction_id`
+  - `observe(telemetry, prediction_id, actual, actual_correctness)`
+    emits the paired `outcome` event
+  - `score_events(events)` reduces a list of events into a
+    `CalibrationReport` with total / resolved / expired / pending
+    counts, mean confidence, mean correctness, calibration score
+    (= 1 - mean absolute error), and overconfident-wrong /
+    underconfident-right counts, all bucketed by `kind`
+  - `calibration_trait(projects_dir)` computes the score over a 60
+    minute window; returns `None` with fewer than 3 resolved pairs
+    so we don't fake a score from no signal
+  - Horizon-bounded: unresolved predictions past their
+    `horizon_seconds` auto-score as 0.5 (uninformative) so the
+    calibration number penalizes claims the agent never verifies
+
+**Avatar trait `calibration`** — new 17th trait. `None` until the
+agent has made 3+ resolved predictions; a real number after that.
+Renders in the trait grid; clients read it from `avatar.json` like
+any other trait.
+
+**Triage rule `prediction_overconfident`** — `mnemosyne_triage`
+post-passes the prediction index and synthesizes one cluster per
+`kind` when confidence ≥ 0.8 paired with correctness ≤ 0.3. Blast
+radius 0.55 (between `identity_slip_detected` at 0.9 and
+`session_error` at 0.7) — high-confidence-but-wrong is worse than
+low-confidence wrongness because it suggests the agent's confidence
+is decoupled from reality.
+
+**New docs**
+  - `docs/VISION.md` — the operational definition of "cognitive
+    OS": five properties, each with a verify command. We use the
+    term because it's now defensible, not because it's flashy.
+  - `docs/COGNITIVE_OS.md` — live checklist. v0.6 flips row 4 from
+    ✗ to ✓. Rows 1 and 2 remain "partial" until v0.7 ships L5
+    identity memory and the Continuity Score suite.
+
+**README tagline**: "The cognitive substrate for local-first
+agents." Substrate, not OS — we don't claim "cognitive OS" until
+all five checklist rows are ✓. That's v0.7.
+
+**Tests:** 246 → 254 green. 8 new:
+  - predictions: score_events computes calibration correctly
+  - predictions: unresolved-within-horizon → pending
+  - predictions: expired → 0.5 (uninformative)
+  - predictions: calibration_trait returns None with <3 resolved
+  - predictions: calibration_trait returns value with 3+ resolved
+  - predict/observe emit linked events
+  - triage: prediction_overconfident cluster fires
+  - avatar: calibration trait appears in state dict
+
+pyflakes clean. shellcheck clean.
+
 ## [0.5.0] — 2026-04-16 — agentic-stack borrows + article
 
 Three narrow ideas borrowed from codejunkie99/agentic-stack (MIT,

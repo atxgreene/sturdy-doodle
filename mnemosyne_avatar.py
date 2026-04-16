@@ -515,6 +515,15 @@ def _compute_state_fresh(
     wisdom_v = _compute_wisdom(mem["total"], age_days, identity_strength)
     self_assessment = _compute_self_assessment(evt)
 
+    # Calibration — new in v0.6. Uses mnemosyne_predictions to score
+    # prediction/outcome pairs over the window. None when fewer than
+    # 3 resolved predictions exist (honest: no signal, no fake score).
+    try:
+        from mnemosyne_predictions import calibration_trait as _calib
+        calibration = _calib(pd, window_minutes=window_minutes)
+    except Exception:
+        calibration = None
+
     return {
         "schema_version": SCHEMA_VERSION,
         "computed_utc": datetime.now(timezone.utc).strftime(
@@ -549,6 +558,10 @@ def _compute_state_fresh(
         "restlessness":    restlessness,      # CV of inter-turn gaps
         "novelty":         novelty,           # new skills per week
         "self_assessment": self_assessment,   # evaluator accept ratio
+        # Self-calibration — property 4 of the cognitive-OS checklist.
+        # 1 − mean(|confidence − actual_correctness|) over resolved
+        # prediction/outcome pairs. Null with fewer than 3 resolved.
+        "calibration":     calibration,
     }
 
 

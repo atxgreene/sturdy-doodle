@@ -142,7 +142,8 @@ jobs:
           from mnemosyne_resolver import check_resolvable, ResolverReport
           from mnemosyne_permissions import Permissions, parse, load
           from mnemosyne_adapter_claude_code import install, uninstall, status
-          print('all 23+ library surfaces import cleanly')
+          from mnemosyne_predictions import predict, observe, score_events, calibration_trait
+          print('all 24+ library surfaces import cleanly')
           "
       - name: Verify UI static assets ship with the package
         run: |

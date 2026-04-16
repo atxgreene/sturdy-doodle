@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.5.0"
+version = "0.6.0"
 description = "Local-first LLM agent framework: ICMS 3-tier memory, 19 model backends, 4-layer identity lock, evolving avatar dashboard. Stdlib only."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -155,6 +155,9 @@ py-modules = [
     #   user-editable permission model + harness adapter pattern
     "mnemosyne_permissions",
     "mnemosyne_adapter_claude_code",
+    # v0.6.0 — the self-calibration property of the cognitive-OS
+    # checklist. See docs/VISION.md + docs/COGNITIVE_OS.md.
+    "mnemosyne_predictions",
 ]
 
 # mnemosyne_ui is a real package (has __init__.py) so its static
