@@ -123,6 +123,8 @@ KIND_DECAY_MULTIPLIERS: dict[str, float] = {
     # knowledge-class — baseline decay
     "fact":           1.0,
     "pattern":        0.5,   # patterns live longer than facts
+    "user_instinct":  0.5,   # v0.8 — user-pattern fast-path; sticky but
+                             # adapts if the user changes behavior
     "trait":          0.3,
     "interest":       0.8,
     "dream_abstract": 1.0,
@@ -518,21 +520,25 @@ class MemoryStore:
                     params.append(source)
                 sql += " ORDER BY last_accessed_utc DESC NULLS LAST, created_utc DESC LIMIT ?"
                 params.append(limit)
-                rows = self._conn.execute(sql, params).fetchall()
-            # Touch access_count + last_accessed_utc + reinforce strength
-            # (Hebbian: used memories strengthen asymptotically toward 1.0)
+                # Touch access_count + last_accessed_utc + reinforce strength
+            # (Hebbian: used memories strengthen asymptotically toward 1.0).
+            # v0.8: batched via executemany — one round-trip instead of N.
             now = _utcnow()
+            updates: list[tuple[str, float, int]] = []
             for row in rows:
                 results.append(dict(row))
-                current_s = float(row["strength"]) if "strength" in row.keys() else 1.0
+                current_s = (float(row["strength"])
+                             if "strength" in row.keys() else 1.0)
                 new_s = current_s + 0.05 * (1.0 - current_s)
-                self._conn.execute(
+                updates.append((now, new_s, row["id"]))
+            if updates:
+                self._conn.executemany(
                     """UPDATE memories
                        SET access_count = access_count + 1,
                            last_accessed_utc = ?,
                            strength = ?
                        WHERE id = ?""",
-                    (now, new_s, row["id"]),
+                    updates,
                 )
         self._emit("memory_read", query=query, hits=len(results),
                    tier_max=tier_max, kind=kind)
@@ -589,18 +595,23 @@ class MemoryStore:
 
         Called by the serve daemon's nightly cron; safe to invoke
         manually via `mnemosyne-memory decay`.
+
+        v0.8: per-row UPDATEs collapsed into two batched executemany
+        calls (strength updates + tier demotions), so a 50K-row scan
+        is one read + at most two writes instead of N+1 round-trips.
         """
         from datetime import datetime as _dt, timezone as _tz
         now = _dt.now(_tz.utc) if now_utc is None else _dt.fromisoformat(
             now_utc.replace("Z", "+00:00"))
-        adjusted = 0
-        demoted = 0
         evicted = 0
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, tier, kind, strength, access_count, "
                 "created_utc, last_accessed_utc FROM memories"
             ).fetchall()
+
+        strength_updates: list[tuple[float, int]] = []
+        tier_updates: list[tuple[int, int]] = []
         for r in rows:
             mid = r["id"]
             kind = r["kind"] or "fact"
@@ -619,7 +630,8 @@ class MemoryStore:
             base = _actr_base_level(max(1, uses), since_first_s)
             # Compress ACT-R output to [0, 1] and multiply by kind rate
             baseline = min(1.0, max(0.0, base / 5.0))
-            kind_mult = KIND_DECAY_MULTIPLIERS.get(kind, DEFAULT_DECAY_MULTIPLIER)
+            kind_mult = KIND_DECAY_MULTIPLIERS.get(
+                kind, DEFAULT_DECAY_MULTIPLIER)
             # Time-since-last weights the decay — use a half-life
             # tied to kind_mult. 7-day half-life at mult=1.0.
             half_life_s = max(3600.0, 86400.0 * 7.0 / max(0.05, kind_mult))
@@ -627,30 +639,29 @@ class MemoryStore:
             new_strength = max(0.0, min(1.0,
                 0.4 * baseline + 0.6 * strength * decay_factor))
             if abs(new_strength - strength) > 0.01:
-                with self._lock:
-                    self._conn.execute(
-                        "UPDATE memories SET strength = ? WHERE id = ?",
-                        (new_strength, mid),
-                    )
-                adjusted += 1
+                strength_updates.append((new_strength, mid))
             # Demote below 0.3 from L4 → L3, from L1/L2 → next tier
             if new_strength < 0.3:
                 tier = r["tier"]
                 if tier == L4_PATTERN:
-                    with self._lock:
-                        self._conn.execute(
-                            "UPDATE memories SET tier = ? WHERE id = ?",
-                            (L3_COLD, mid),
-                        )
-                    demoted += 1
+                    tier_updates.append((L3_COLD, mid))
                 elif tier in (L1_HOT, L2_WARM) and new_strength < 0.1:
                     # Only demote hot/warm to cold if effectively dead
-                    with self._lock:
-                        self._conn.execute(
-                            "UPDATE memories SET tier = ? WHERE id = ?",
-                            (tier + 1, mid),
-                        )
-                    demoted += 1
+                    tier_updates.append((tier + 1, mid))
+
+        with self._lock:
+            if strength_updates:
+                self._conn.executemany(
+                    "UPDATE memories SET strength = ? WHERE id = ?",
+                    strength_updates,
+                )
+            if tier_updates:
+                self._conn.executemany(
+                    "UPDATE memories SET tier = ? WHERE id = ?",
+                    tier_updates,
+                )
+        adjusted = len(strength_updates)
+        demoted = len(tier_updates)
         self._emit("memory_decay_pass", adjusted=adjusted,
                    demoted=demoted, evicted=evicted)
         return {"adjusted": adjusted, "demoted": demoted, "evicted": evicted}

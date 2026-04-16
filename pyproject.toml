@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.7.1"
+version = "0.8.0"
 description = "Local-first LLM agent framework: ICMS 3-tier memory, 19 model backends, 4-layer identity lock, evolving avatar dashboard. Stdlib only."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -97,6 +97,7 @@ mnemosyne-resolver     = "mnemosyne_resolver:_main"
 mnemosyne-adapter-claude-code = "mnemosyne_adapter_claude_code:_main"
 mnemosyne-compactor    = "mnemosyne_compactor:_main"
 mnemosyne-continuity   = "mnemosyne_continuity:_main"
+mnemosyne-instinct     = "mnemosyne_instinct:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -165,6 +166,9 @@ py-modules = [
     # See docs/BENCHMARKS_v0.7.md.
     "mnemosyne_compactor",
     "mnemosyne_continuity",
+    # v0.8.0 — user-pattern distillation overlay on L4 (kind=user_instinct);
+    # consumed by Brain on every turn. See docs/ARCHITECTURE.md.
+    "mnemosyne_instinct",
 ]
 
 # mnemosyne_ui is a real package (has __init__.py) so its static

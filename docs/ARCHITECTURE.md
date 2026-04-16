@@ -57,7 +57,10 @@ The model is the engine. The harness — retrieval, memory, tool dispatch, promp
 │  LAYER 3: Base harness                                  │
 │  (eternal-context)                                      │
 │                                                         │
-│  ICMS 3-tier memory        L1 hot / L2 warm / L3 cold  │
+│  ICMS 5-tier memory        L1 hot / L2 warm / L3 cold  │
+│                            L4 pattern / L5 identity     │
+│  Instinct overlay          user-pattern fast-path       │
+│                            (L4 kind=user_instinct)      │
 │  SDI selection             context window management    │
 │  11 tools                  search, read, compute, etc.  │
 │  Channel adapters          Telegram/Slack/Discord/REST  │
@@ -85,6 +88,87 @@ Most agent stacks collapse layers 1–3 into a single repo. Mnemosyne separates 
 - **Layer 2 (meta-harness) operates ON Layer 3 (base harness), not inside it.** The consciousness extensions observe and reshape the base agent between turns — dream consolidation, metacognition, behavioral coupling. This is the key architectural decision that makes Mnemosyne more than a standard agent: the meta-harness is a feedback loop over the harness, which is exactly what the Meta-Harness paper describes automating.
 
 - **Layer 4 (engine) is the cheapest part to swap.** Changing from `qwen3:8b` to `gemma4:e4b` is one environment variable. The harness stays the same. This is the 6x-gap principle: the model matters less than what surrounds it.
+
+---
+
+## Memory architecture — ICMS 5-tier + Instinct overlay
+
+The memory system is the most-iterated subsystem in this repo. As of v0.8 it has five persistent tiers plus a runtime overlay that gives the agent a fast, user-personalized "instinct" path. The whole thing is one SQLite + FTS5 database — `tier`, `kind`, and `strength` columns on a single `memories` table do all the work. No graph DB, no vector store (optional embeddings exist but are not required), no third-party memory backend.
+
+### Canonical tier table
+
+| Constant      | Tier | Name     | Purpose                                                | Decay |
+| :------------ | :--: | :------- | :----------------------------------------------------- | :---- |
+| `L1_HOT`      |  1   | hot      | Working memory; current session context                | fast  |
+| `L2_WARM`     |  2   | warm     | Short-term; default tier for new writes                | medium|
+| `L3_COLD`     |  3   | cold     | Long-term; demoted from L2 by `demote_unused`          | slow  |
+| `L4_PATTERN`  |  4   | pattern  | Recurring clusters promoted by `mnemosyne_compactor`   | slow  |
+| `L5_IDENTITY` |  5   | identity | Human-approved core values; injected every turn        | very slow |
+
+These are the **only** tier constants. `mnemosyne_memory.py` exports them at module scope; `KIND_DECAY_MULTIPLIERS` modifies decay rate per content kind (e.g. `core_value` 0.1×, `failure_note` 3.0×). If a doc anywhere refers to "archival" or "meta-memory" tiers, it's wrong — that vocabulary doesn't exist in the code.
+
+### Instinct overlay (v0.8)
+
+Instinct is **not a sixth tier.** It's a fast-path overlay on L4 that gives the agent learned, user-specific reactions without disturbing the persistent hierarchy. Implementation:
+
+- **Storage:** rows live in L4 with `kind="user_instinct"` and `source="instinct"`. They use the same `memories` table; no schema change.
+- **Population:** `mnemosyne_instinct.distill()` runs in dream cycles (or on demand). It scans recent L1/L2/L3 rows whose kinds signal user-pattern intent (`preference`, `fact`, `event`, `tool_result`), groups by topic-token signature, and writes the top-N recurring patterns as user-instinct rows. Each pass replaces the prior batch idempotently.
+- **Consumption:** `Brain._build_instinct_block()` injects user-instinct rows into the system prompt on every turn, parallel to the L5 identity block. Brain checks instinct *before* doing query-relevance retrieval against the rest of the store.
+- **Decay:** user-instinct rows use the `user_instinct` kind multiplier (0.5×) — slower than ops, faster than identity. Stale preferences get demoted; reinforced ones stay.
+
+This is the closest the architecture gets to "automatic learned behavior shaped by reflection." Reflection isn't a separate tier — it's what L5 + the dream/compactor cycle already do. Distilled output flows down into L4 Pattern (via the compactor) or into the user-instinct rows (via `mnemosyne_instinct`). On the next turn, the Brain reads them as part of its system context. That's the loop.
+
+### Diagram
+
+```
+                                                    ┌──────────────────────┐
+                                                    │  Reflection loop      │
+                                                    │  (dreams + compactor) │
+                                                    │                       │
+                                                    │  • cluster L3 → L4    │
+                                                    │  • distill user       │
+                                                    │    patterns → L4      │
+                                                    │    (user_instinct)    │
+                                                    └──────────┬────────────┘
+                                                               │  offline
+                                                               ▼
+   ingest                       ingest                  inject every turn
+     │                            │                        │
+     ▼                            ▼                        ▼
+  ┌──────┐  promote   ┌──────┐  promote   ┌──────┐    ┌────────────┐    ┌──────────┐
+  │  L1  ├───────────►│  L2  ├───────────►│  L3  │    │  L4        │    │  L5      │
+  │  hot │            │ warm │            │ cold │    │  pattern   │    │ identity │
+  │      │◄──demote───│      │◄──demote───│      │    │ +instinct  │    │  (core)  │
+  └───┬──┘            └──────┘            └──────┘    └─────┬──────┘    └────┬─────┘
+      │                                                     │                │
+      └─────────────► query-time retrieval ◄────────────────┘                │
+                                                                             │
+                                       Brain system prompt ◄─────────────────┘
+                                       (every turn, query-independent)
+```
+
+### Comparison to human memory models — the honest version
+
+The system draws on Atkinson–Shiffrin (multi-store) and ACT-R (base-level activation, recency × frequency × spacing) — not a strict literal mapping, but a useful framing.
+
+| Mnemosyne tier  | Closest human-memory analogue                          | Important caveat                              |
+| :-------------- | :----------------------------------------------------- | :-------------------------------------------- |
+| L1 Hot          | Working memory (Baddeley)                              | No phonological loop; it's just a hot SQL row |
+| L2 Warm         | Short-term store with rehearsal                        | Rehearsal happens via reads, not vocal loop   |
+| L3 Cold         | Consolidated long-term memory (semantic + episodic)    | No interference effects; clean retrieval      |
+| L4 Pattern      | Procedural memory + schemas / habituation              | Built by stdlib clustering, not synaptic plasticity |
+| L4 user_instinct| Priming + automatic preferences                        | Distilled deliberately; not subliminal        |
+| L5 Identity     | Core self-schema / autobiographical anchor             | Human-approved-only; not auto-learned         |
+
+**What the cognitive-science framing buys us:** ACT-R-shaped decay (`KIND_DECAY_MULTIPLIERS` × time-since-last) gives us forgetting curves that look reasonable; the multi-store progression gives users a familiar mental model.
+
+**What it doesn't buy us:** sentience, emotion, embodied grounding. The cognitive-OS checklist in `docs/COGNITIVE_OS.md` is the operational definition we actually defend; the human-memory analogy is pedagogical scaffolding, not a load-bearing claim.
+
+### Bottlenecks and ongoing work
+
+- `apply_decay()` and `search()` use batched `executemany` UPDATEs as of v0.8 — full-scan decay still O(N) but with one round-trip instead of N.
+- L4 quality is monitored via `mnemosyne-compactor audit` (v0.8): hit-rate, dead-pattern fraction, average age. Mem0 reportedly hits 97% junk in production audits without strict rules; the compactor's `min_cluster_size` + `source_ids` idempotency + audit pass are the defenses against the same failure mode.
+- Comparative benchmarks against Mem0 / LongMemEval / LOCOMO live in `bench/` (skeleton in v0.8; first numbers TBD).
 
 ---
 

@@ -57,6 +57,7 @@ import mnemosyne_train as train_mod  # noqa: E402
 import mnemosyne_triage as tri  # noqa: E402
 import mnemosyne_compactor as compactor_mod  # noqa: E402
 import mnemosyne_continuity as continuity_mod  # noqa: E402
+import mnemosyne_instinct as instinct_mod  # noqa: E402
 import scenario_runner as sr  # noqa: E402
 
 
@@ -4705,6 +4706,221 @@ def _():
     assert mm._fts5_escape("a b", any_token=True) == '"a" OR "b"'
     # Single-token queries return a single quoted term regardless of mode
     assert mm._fts5_escape("a", any_token=True) == '"a"'
+
+
+# =============================================================================
+#  v0.8: mnemosyne_instinct (user-pattern distillation overlay on L4)
+# =============================================================================
+
+@test("instinct: distill clusters recurring user-pattern signals into L4")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(f"user prefers terse direct responses no hedging {i}",
+                        kind="preference")
+        for i in range(3):
+            store.write(f"user uses dark mode editor terminal app {i}",
+                        kind="preference")
+        # Noise that should not become an instinct
+        store.write("failed to call api timeout", kind="failure_note")
+
+        r = instinct_mod.distill(store, lookback_days=30,
+                                  min_cluster_size=2, max_instincts=10)
+        assert r["written"] >= 2, r
+        rows = instinct_mod.list_instincts(store)
+        assert len(rows) == r["written"], rows
+        # Failure-note kind is excluded from candidate kinds
+        contents = " ".join(row["content"] for row in rows)
+        assert "failed" not in contents.lower(), contents
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("instinct: distill is idempotent (deletes prior batch on re-run)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(f"user prefers verbose explanations and examples {i}",
+                        kind="preference")
+        r1 = instinct_mod.distill(store, lookback_days=30,
+                                   min_cluster_size=2, max_instincts=10)
+        r2 = instinct_mod.distill(store, lookback_days=30,
+                                   min_cluster_size=2, max_instincts=10)
+        assert r1["written"] >= 1
+        assert r2["deleted_prior"] == r1["written"], r2
+        # Total instinct count in DB equals second pass's written count
+        rows = instinct_mod.list_instincts(store)
+        assert len(rows) == r2["written"], rows
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("instinct: dry_run writes nothing")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(f"user prefers metric units convert please {i}",
+                        kind="preference")
+        r = instinct_mod.distill(store, lookback_days=30,
+                                  min_cluster_size=2, max_instincts=10,
+                                  dry_run=True)
+        assert r["written"] == 0, r
+        assert r["deleted_prior"] == 0, r
+        assert instinct_mod.list_instincts(store) == []
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("instinct: clear_instincts deletes all user_instinct rows")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(3):
+            store.write(f"user prefers serif fonts when reading code {i}",
+                        kind="preference")
+        instinct_mod.distill(store, lookback_days=30,
+                              min_cluster_size=2, max_instincts=10)
+        before = len(instinct_mod.list_instincts(store))
+        deleted = instinct_mod.clear_instincts(store)
+        assert deleted == before
+        assert instinct_mod.list_instincts(store) == []
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.8: user_instinct rows land in system prompt on every turn")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(f"user prefers terse responses no hedging {i}",
+                        kind="preference")
+        instinct_mod.distill(store, lookback_days=30,
+                              min_cluster_size=2, max_instincts=10)
+
+        captured: dict[str, Any] = {}
+
+        def fake_chat(messages, **kw):
+            captured["messages"] = messages
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=False),
+                     chat_fn=fake_chat, memory=store)
+        b.turn("hi")
+        sys_msg = next(m for m in captured["messages"]
+                       if m["role"] == "system")
+        assert "Learned user instincts" in sys_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  v0.8: mnemosyne_compactor audit
+# =============================================================================
+
+@test("compactor v0.8: audit_patterns reports hit-rate and dead-fraction")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        # Plant + age + promote two distinct patterns. The two clusters
+        # need vocabulary that's lexically distinct or the Jaccard
+        # threshold collapses them into one cluster.
+        for i in range(8):
+            store.write(
+                f"network timeout connecting upstream service {i}",
+                kind="event", tier=mm.L3_COLD)
+        for i in range(5):
+            store.write(
+                f"obsidian vault sync hiccup occurred during write {i}",
+                kind="event", tier=mm.L3_COLD)
+        store._conn.execute(
+            "UPDATE memories SET created_utc='2020-01-01T00:00:00.000000Z'"
+        )
+        compactor_mod.compact_patterns(store, min_age_days=1,
+                                        min_cluster_size=3)
+        # Make L4 rows aged so the dead-age threshold actually applies
+        store._conn.execute(
+            "UPDATE memories SET created_utc='2024-01-01T00:00:00.000000Z' "
+            "WHERE kind='pattern'"
+        )
+        ids = [r[0] for r in store._conn.execute(
+            "SELECT id FROM memories WHERE kind='pattern' ORDER BY id"
+        ).fetchall()]
+        # Mark one pattern as accessed; leave the other dead
+        store._conn.execute(
+            "UPDATE memories SET access_count=3 WHERE id=?", (ids[0],))
+
+        report = compactor_mod.audit_patterns(store, dead_age_days=30)
+        assert report["total_patterns"] == 2, report
+        assert report["hit_count"] == 1, report
+        assert report["hit_rate"] == 0.5, report
+        assert report["dead_count"] == 1, report
+        assert report["dead_fraction"] == 0.5, report
+        assert report["avg_age_days"] > 0, report
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  v0.8: batched UPDATEs (regression smoke — ensure semantics unchanged)
+# =============================================================================
+
+@test("memory v0.8: search() batched reinforce still updates every hit")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(5):
+            store.write(f"common topic about widgets and gizmos {i}",
+                        kind="fact")
+        baseline_strengths = [
+            float(r["strength"]) for r in store._conn.execute(
+                "SELECT strength FROM memories ORDER BY id"
+            ).fetchall()
+        ]
+        # All start at 1.0 by default — ensure that's the baseline.
+        for s in baseline_strengths:
+            assert s == 1.0, baseline_strengths
+        hits = store.search("widgets gizmos", limit=5)
+        assert len(hits) == 5, hits
+        # Each row should now have access_count >= 1 (batched UPDATE
+        # touched all matched rows, not just the first).
+        rows = store._conn.execute(
+            "SELECT access_count FROM memories ORDER BY id"
+        ).fetchall()
+        for r in rows:
+            assert r["access_count"] >= 1, dict(r)
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.8: apply_decay still demotes L4 patterns below 0.3")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        p = store.write("pattern row", kind="pattern", tier=mm.L4_PATTERN)
+        store._conn.execute(
+            "UPDATE memories SET strength = 0.05, "
+            "created_utc='2020-01-01T00:00:00.000000Z', "
+            "last_accessed_utc='2020-01-01T00:00:00.000000Z'"
+        )
+        store.apply_decay()
+        row = store.get(p)
+        assert row["tier"] == mm.L3_COLD, row
+    finally:
+        shutil.rmtree(pd)
 
 
 @test("brain v0.7: L5 identity rows land in system prompt on every turn")

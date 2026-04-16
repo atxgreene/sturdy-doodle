@@ -1,0 +1,23 @@
+# Optional dependencies for bench/ scripts only.
+# DO NOT add these to the main pyproject.toml — the Mnemosyne core is
+# stdlib-only by design.
+#
+# Install into a separate venv:
+#   python3 -m venv bench/.venv
+#   bench/.venv/bin/pip install -r bench/requirements.txt
+
+# Dataset loading (LOCOMO + LongMemEval ship via Hugging Face)
+datasets>=3.0
+
+# Comparator: Mem0 head-to-head
+mem0ai>=0.1.50
+
+# LLM-as-judge backbone for LOCOMO scoring + Mem0 internal LLM calls
+openai>=1.50
+
+# Embedding provider used by Mem0's vector store. Swap for any other
+# embedding model if you prefer a local one.
+sentence-transformers>=3.0
+
+# Tokenizer for fair token-cost comparison across systems
+tiktoken>=0.7

@@ -29,3 +29,7 @@ dist/
 mnemosyne-setup-local/
 projects/
 venv/
+
+# Benchmark scratch (bench/results, bench venv) — do not commit
+bench/results/
+bench/.venv/

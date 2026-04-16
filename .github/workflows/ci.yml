@@ -108,16 +108,17 @@ jobs:
             [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
           done
           # v0.2.0+ rigor pass + v0.3.x UI / resolver + v0.5.0 adapter
-          # + v0.7.0 compactor & continuity
+          # + v0.7.0 compactor & continuity + v0.8.0 instinct
           for cmd in mnemosyne-proposer mnemosyne-dreams mnemosyne-apply \
                     mnemosyne-scengen mnemosyne-goals mnemosyne-mcp \
                     mnemosyne-serve mnemosyne-train mnemosyne-batch \
                     mnemosyne-datagen mnemosyne-avatar mnemosyne-resolver \
                     mnemosyne-adapter-claude-code \
-                    mnemosyne-compactor mnemosyne-continuity; do
+                    mnemosyne-compactor mnemosyne-continuity \
+                    mnemosyne-instinct; do
             [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
           done
-          echo "all 24 entry points installed"
+          echo "all 25 entry points installed"
       - name: Verify library imports without sys.path shims
         run: |
           /tmp/ci-venv/bin/python3 -c "
@@ -147,9 +148,11 @@ jobs:
           from mnemosyne_predictions import predict, observe, score_events, calibration_trait
           # v0.7.0 library surfaces
           from mnemosyne_memory import L4_PATTERN, L5_IDENTITY, KIND_DECAY_MULTIPLIERS
-          from mnemosyne_compactor import compact_patterns
+          from mnemosyne_compactor import compact_patterns, audit_patterns
           from mnemosyne_continuity import load_scenarios, run_continuity, judge_response
-          print('all 26+ library surfaces import cleanly')
+          # v0.8.0 library surfaces
+          from mnemosyne_instinct import distill, list_instincts, clear_instincts
+          print('all 27+ library surfaces import cleanly')
           "
       - name: Verify UI static assets ship with the package
         run: |

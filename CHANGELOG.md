@@ -2,6 +2,109 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.8.0] — 2026-04-16 — Instinct overlay + compactor audit + bench skeleton
+
+Adds the **Instinct overlay** — a fast-path layer of distilled
+user-pattern signals that the Brain consults on every turn before
+query-relevance retrieval runs. Not a sixth tier (the v0.7 layout L1-L5
+stays put); instinct rows live in L4 with `kind="user_instinct"` and
+the substrate's existing decay + reinforcement + idempotency machinery
+covers them for free.
+
+Also lands the two real bottleneck fixes from the v0.7 audit, a
+compactor audit pass that defends against the Mem0-style 97%-junk
+failure mode, and a bench/ skeleton so the LOCOMO-vs-Mem0 head-to-head
+has a runnable home.
+
+**New module `mnemosyne_instinct.py`**
+  - `distill(store, *, lookback_days, min_cluster_size, max_instincts,
+    jaccard_threshold, dry_run)` scans recent rows whose kinds bear
+    user-pattern intent (`preference`, `fact`, `interest`, `event`,
+    `project`), clusters by token overlap, and writes the top-N
+    recurring patterns as L4 rows with `kind="user_instinct"`,
+    `source="instinct"`. Operational kinds (`failure_note`,
+    `tool_result`, `turn`) are deliberately excluded — they're noise
+    not signal.
+  - **Idempotent**: every pass deletes the prior user-instinct batch
+    before writing the next. Safe to run on a cron.
+  - **Capped**: `max_instincts` (default 20) bounds the system-prompt
+    injection budget — typically <500 tokens.
+  - `list_instincts()` and `clear_instincts()` for inspection + reset.
+  - `mnemosyne-instinct distill | list | clear` CLI.
+
+**Brain change (`mnemosyne_brain.py`)**
+  - New `_build_instinct_block()` injects user-instinct rows into the
+    system prompt every turn, parallel to the v0.7 L5 identity block
+    and decoupled from it (you can clear instincts without touching
+    core values).
+
+**Memory primitive: `KIND_DECAY_MULTIPLIERS["user_instinct"] = 0.5`**
+  - Slower than ops, faster than identity. Sticky enough to persist
+    across sessions; adapts when the user changes behavior.
+
+**Bottleneck fixes (`mnemosyne_memory.py`)**
+  - `search()` collapses N per-row reinforce UPDATEs into one
+    `executemany`. Search hit path stays the same; high-fanout queries
+    no longer pay an N×round-trip tax.
+  - `apply_decay()` collects strength + tier updates into two batched
+    `executemany` calls. 50K-row decay pass: 6.15 s on reference
+    hardware (versus the projected ~7 s+ at the old per-row rate).
+
+**`mnemosyne-compactor audit` (new subcommand)**
+  - `audit_patterns(store, *, dead_age_days)` returns `total_patterns`,
+    `hit_count`, `hit_rate`, `dead_count` (zero accesses + older than
+    threshold), `dead_fraction`, `avg_age_days`, `avg_cluster_size`.
+  - Defense against the Mem0-style 97%-junk-accumulation failure mode:
+    if a substrate's pattern store fills with rows nobody ever reads,
+    you want a number that says so. `dead_fraction > 0.5` is a real
+    drift signal triage can cluster on (future work).
+
+**`bench/` directory (skeleton)**
+  - `bench/locomo.py` — LOCOMO benchmark runner with `MnemosyneSubstrate`
+    and `Mem0Substrate` adapters. Loads dataset via Hugging Face,
+    ingests turns, probes with questions, runs LLM-as-judge, writes
+    JSON report. Skeleton only — judge model + temperature deliberately
+    not pinned because that choice is the dominant variance source in
+    published numbers.
+  - `bench/requirements.txt` — `datasets`, `mem0ai`, `openai`,
+    `sentence-transformers`, `tiktoken`. **Not** added to the main
+    `pyproject.toml`. Install into `bench/.venv` to keep the
+    stdlib-only invariant of the core.
+  - `bench/README.md` — explains why this lives outside the core and
+    how to run.
+  - `.gitignore` updated for `bench/results/` and `bench/.venv/`.
+
+**Docs**
+  - `docs/ARCHITECTURE.md` — significant memory-architecture section
+    rewrite. Fixes the L4/L5 ambiguity surfaced last session: a single
+    canonical tier table (L1 hot, L2 warm, L3 cold, L4 pattern, L5
+    identity) replaces the stale 3-tier description that an external
+    LLM mis-summarized as "L4=archival, L5=meta-memory." Adds the
+    Instinct overlay framing, an ASCII diagram of the
+    Reflection→Instinct loop, an honest human-memory comparison table,
+    and ongoing-work notes (bottlenecks fixed, audit pass, bench/).
+
+**Packaging**
+  - `pyproject.toml` 0.7.1 → 0.8.0
+  - `mnemosyne_instinct` added to `py-modules`
+  - `mnemosyne-instinct` added to `[project.scripts]`. CLI count 24 → 25.
+  - CI install-smoke probes the new entry point + library surfaces
+    (`distill`, `list_instincts`, `clear_instincts`, `audit_patterns`).
+
+**Tests:** 271 → 279 green. 8 new:
+  - instinct: distill clusters recurring user-pattern signals into L4
+  - instinct: distill is idempotent (deletes prior batch on re-run)
+  - instinct: dry_run writes nothing
+  - instinct: clear_instincts deletes all user_instinct rows
+  - brain v0.8: user_instinct rows land in system prompt on every turn
+  - compactor v0.8: audit_patterns reports hit-rate and dead-fraction
+  - memory v0.8: search() batched reinforce still updates every hit
+  - memory v0.8: apply_decay still demotes L4 patterns below 0.3
+
+pyflakes clean. Throughput regression check: search-hit 2.38 ms/op,
+search-OR-fallback 4.76 ms/op, decay 0.10 ms/row at 5K, decay 6.15 s
+at 50K.
+
 ## [0.7.1] — 2026-04-16 — substrate recall fallback + dryrun 0.34 → 0.96
 
 Beats the Continuity Score dryrun without adding a single dependency

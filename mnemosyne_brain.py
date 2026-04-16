@@ -365,6 +365,16 @@ class Brain:
         if l5_block:
             system_parts.append(l5_block)
 
+        # v0.8 user-instinct overlay — distilled user-pattern signals
+        # from mnemosyne_instinct.distill(). Injected every turn so
+        # learned preferences (terse vs verbose, tool affinities, etc.)
+        # influence behavior before query-relevance retrieval runs.
+        # Decoupled from L5 identity so users can clear instincts
+        # without touching their core values.
+        instinct_block = self._build_instinct_block()
+        if instinct_block:
+            system_parts.append(instinct_block)
+
         if self.config.personality:
             system_parts.append(self.config.personality.strip())
 
@@ -801,6 +811,37 @@ class Brain:
             return es.format_markdown(es.build_snapshot())
         except Exception:
             return ""
+
+    def _build_instinct_block(self, *, limit: int = 20) -> str:
+        """Pull user-instinct rows (kind=user_instinct, populated by
+        mnemosyne_instinct.distill) and inject as a fast-path system
+        block on every turn.
+
+        These are distilled user-interaction patterns — preferred
+        response style, recurring topics, tool affinities — that the
+        agent should react to automatically rather than rediscovering
+        each session. Silent no-op if no instincts have been distilled
+        yet or the query fails.
+        """
+        try:
+            with self.memory._lock:  # noqa: SLF001
+                rows = self.memory._conn.execute(  # noqa: SLF001
+                    "SELECT content FROM memories "
+                    "WHERE kind = 'user_instinct' "
+                    "ORDER BY strength DESC, last_accessed_utc DESC "
+                    "LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        except Exception:
+            return ""
+        if not rows:
+            return ""
+        lines = [f"- {r['content']}" for r in rows]
+        return (
+            "## Learned user instincts (distilled patterns; "
+            "react automatically)\n\n"
+            + "\n".join(lines)
+        )
 
     def _build_l5_identity_block(self, *, limit: int = 20) -> str:
         """Pull L5 identity memories as a persistent system-prompt block.
