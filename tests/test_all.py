@@ -46,6 +46,7 @@ import mnemosyne_proposer as proposer  # noqa: E402
 import mnemosyne_scengen as scengen  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
 import mnemosyne_avatar as avatar_mod  # noqa: E402
+import mnemosyne_permissions as perm_mod  # noqa: E402
 import mnemosyne_resolver as resolver_mod  # noqa: E402
 import mnemosyne_batch as batch_mod  # noqa: E402
 import mnemosyne_datagen as datagen  # noqa: E402
@@ -3865,6 +3866,393 @@ def _():
         assert "no_tool_dispatched" not in cluster_types
     finally:
         shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_permissions — user-editable permission model
+# =============================================================================
+
+@test("permissions: empty file allows everything")
+def _():
+    p = perm_mod.parse("")
+    assert p.is_skill_allowed("anything") == (True, "")
+    assert p.is_path_allowed("/tmp/x") == (True, "")
+
+
+@test("permissions: allow-list mode denies unlisted skills")
+def _():
+    p = perm_mod.parse("""
+## allowed_skills
+- fs_read
+- grep_code
+""")
+    assert p.is_skill_allowed("fs_read")[0]
+    assert p.is_skill_allowed("grep_code")[0]
+    ok, reason = p.is_skill_allowed("fs_write_safe")
+    assert not ok and "allowed_skills" in reason
+
+
+@test("permissions: denied_skills always deny regardless of allow-list")
+def _():
+    p = perm_mod.parse("""
+## allowed_skills
+- fs_read
+- fs_write_safe
+
+## denied_skills
+- fs_write_safe
+""")
+    assert p.is_skill_allowed("fs_read")[0]
+    ok, reason = p.is_skill_allowed("fs_write_safe")
+    assert not ok and "denied_skills" in reason
+
+
+@test("permissions: forbidden_paths block prefix matches")
+def _():
+    import os as _os
+    p = perm_mod.parse(f"""
+## forbidden_paths
+- {_os.path.expanduser('~/.ssh')}
+- /etc/shadow
+""")
+    ok, _ = p.is_path_allowed(_os.path.expanduser("~/.ssh/id_rsa"))
+    assert not ok
+    ok, _ = p.is_path_allowed("/etc/shadow")
+    assert not ok
+    ok, _ = p.is_path_allowed("/tmp/anything")
+    assert ok
+
+
+@test("permissions: rate_limits parse with sec/min/hour units")
+def _():
+    p = perm_mod.parse("""
+## rate_limits
+- http_get: 60/min
+- web_fetch_text: 10/sec
+- expensive_llm: 100/hour
+""")
+    assert p.rate_limits["http_get"] == (60, 60)
+    assert p.rate_limits["web_fetch_text"] == (10, 1)
+    assert p.rate_limits["expensive_llm"] == (100, 3600)
+
+
+@test("permissions: rate limiter allows N then blocks N+1 within window")
+def _():
+    rl = perm_mod._RollingRateLimiter()
+    for _ in range(3):
+        ok, _ = rl.check("foo", count=3, window_s=60)
+        assert ok
+    ok, reason = rl.check("foo", count=3, window_s=60)
+    assert not ok and "rate limit" in reason
+
+
+@test("permissions: load() returns empty permissions when file absent")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        p = perm_mod.load(projects_dir=pd)
+        assert p.allowed_skills == set()
+        assert p.denied_skills == set()
+        assert p.is_skill_allowed("anything") == (True, "")
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("permissions: write_example creates a ready-to-edit template")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        path = perm_mod.write_example(projects_dir=pd)
+        assert path.is_file()
+        body = path.read_text(encoding="utf-8")
+        assert "# Mnemosyne permissions" in body
+        assert "## allowed_skills" in body
+        assert "## forbidden_paths" in body
+        # Refuses to overwrite without the flag
+        try:
+            perm_mod.write_example(projects_dir=pd)
+            raised = False
+        except FileExistsError:
+            raised = True
+        assert raised
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: enforce_permissions blocks denied skill dispatch")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        (pd / "permissions.md").write_text("""
+## denied_skills
+- forbidden_tool
+""", encoding="utf-8")
+
+        import os as _os
+        saved = _os.environ.get("MNEMOSYNE_PROJECTS_DIR")
+        _os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        try:
+            reg = sk.SkillRegistry()
+
+            @reg.register_python("forbidden_tool", "a tool that's on the deny list",
+                                   [{"name": "x", "type": "string", "required": True}])
+            def _bad(x): return {"ok": True, "x": x}
+
+            @reg.register_python("allowed_tool", "a tool that is always fine",
+                                   [{"name": "y", "type": "string", "required": True}])
+            def _good(y): return {"ok": True, "y": y}
+
+            call_count = {"n": 0}
+
+            def fake_chat(messages, **kw):
+                call_count["n"] += 1
+                if call_count["n"] == 1:
+                    return {"status": "ok", "text": "dispatching",
+                            "tool_calls": [
+                                {"id": "t1", "name": "forbidden_tool",
+                                 "arguments": {"x": "a"}},
+                                {"id": "t2", "name": "allowed_tool",
+                                 "arguments": {"y": "b"}},
+                            ]}
+                return {"status": "ok", "text": "final", "tool_calls": []}
+
+            store = mm.MemoryStore(path=pd / "memory.db")
+            cfg = br.BrainConfig(
+                adapt_to_context=False,
+                inject_env_snapshot=False,
+                enforce_permissions=True,
+            )
+            brain = br.Brain(config=cfg, memory=store, skills=reg,
+                             chat_fn=fake_chat,
+                             telemetry=None)
+            r = brain.turn("please call both tools")
+            names = [tc["name"] for tc in r.tool_calls]
+            assert "forbidden_tool" in names    # attempt was made
+            assert "allowed_tool" in names
+            # forbidden_tool's result should be a permission_denied error
+            forbidden = next(tc for tc in r.tool_calls
+                              if tc["name"] == "forbidden_tool")
+            assert forbidden["result"].get("error") == "permission_denied"
+            allowed = next(tc for tc in r.tool_calls
+                            if tc["name"] == "allowed_tool")
+            assert allowed["result"].get("ok") is True
+            store.close()
+        finally:
+            if saved is None:
+                _os.environ.pop("MNEMOSYNE_PROJECTS_DIR", None)
+            else:
+                _os.environ["MNEMOSYNE_PROJECTS_DIR"] = saved
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_memory.export_to_git — autobiography
+# =============================================================================
+
+@test("memory: export_to_git writes one markdown per memory + tier dirs")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        store.write(content="hot preference", tier=1, kind="preference")
+        store.write(content="warm project note", tier=2, kind="project")
+        store.write(content="cold old fact", tier=3, kind="fact")
+        out = pd / "autobio"
+        result = store.export_to_git(out, tier_min=2)
+        assert result["count"] == 2   # L2 + L3, not L1
+        files = sorted(out.rglob("*.md"))
+        assert len(files) == 2
+        # Tier subdirs correctly used
+        tiers = {f.parent.name for f in files}
+        assert tiers == {"L2", "L3"}
+        # Content preserved
+        assert "warm project note" in files[0].read_text()
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory: export_to_git respects --since filter")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        store.write(content="ancient", tier=2)
+        # Backdate the first row
+        store._conn.execute(
+            "UPDATE memories SET created_utc = '2020-01-01T00:00:00.000000Z' "
+            "WHERE id = 1",
+        )
+        store.write(content="recent", tier=2)
+        out = pd / "autobio"
+        result = store.export_to_git(out, tier_min=2, since="2025-01-01T00:00:00Z")
+        assert result["count"] == 1, result
+        content = (next(out.rglob("*.md"))).read_text()
+        assert "recent" in content
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory: export_to_git is safe when git binary missing")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        store.write(content="x", tier=2)
+        # Even if git fails mid-way, files should be written and the
+        # function should not raise.
+        out = pd / "autobio"
+        result = store.export_to_git(out, tier_min=2)
+        assert result["count"] == 1
+        assert result["repo"] == str(out)
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_adapter_claude_code — harness adapter
+# =============================================================================
+
+import mnemosyne_adapter_claude_code as cc_adapter  # noqa: E402
+
+
+@test("adapter-claude-code: install creates CLAUDE.md + hooks + settings")
+def _():
+    proj = _tmp_projects_dir()
+    target = _tmp_projects_dir()
+    try:
+        cc_adapter.install(target, projects_dir=proj)
+        assert (target / "CLAUDE.md").is_file()
+        body = (target / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "mnemosyne-adapter:begin" in body
+        assert (target / ".claude" / "mnemosyne" / "hooks"
+                / "session_start.sh").is_file()
+        assert (target / ".claude" / "settings.json").is_file()
+        settings = json.loads((target / ".claude" / "settings.json")
+                                .read_text(encoding="utf-8"))
+        assert "hooks" in settings
+        # Our hook command path is wired
+        stop_hooks = settings["hooks"].get("Stop") or []
+        assert any(".claude/mnemosyne/hooks" in h["command"]
+                   for entry in stop_hooks
+                   for h in entry.get("hooks") or [])
+    finally:
+        shutil.rmtree(proj)
+        shutil.rmtree(target)
+
+
+@test("adapter-claude-code: install is non-destructive to existing CLAUDE.md")
+def _():
+    proj = _tmp_projects_dir()
+    target = _tmp_projects_dir()
+    try:
+        user_content = "# My existing project\n\nRespect existing rules.\n"
+        (target / "CLAUDE.md").write_text(user_content, encoding="utf-8")
+        cc_adapter.install(target, projects_dir=proj)
+        body = (target / "CLAUDE.md").read_text(encoding="utf-8")
+        # User content preserved, our block appended
+        assert user_content.strip() in body
+        assert "mnemosyne-adapter:begin" in body
+    finally:
+        shutil.rmtree(proj)
+        shutil.rmtree(target)
+
+
+@test("adapter-claude-code: install is idempotent with --force")
+def _():
+    proj = _tmp_projects_dir()
+    target = _tmp_projects_dir()
+    try:
+        cc_adapter.install(target, projects_dir=proj)
+        body_1 = (target / "CLAUDE.md").read_text(encoding="utf-8")
+        # Second install without --force warns instead of duplicating
+        r2 = cc_adapter.install(target, projects_dir=proj)
+        assert any("already has" in w for w in r2["warnings"])
+        body_2 = (target / "CLAUDE.md").read_text(encoding="utf-8")
+        assert body_1 == body_2
+        # With --force, replaces rather than duplicates
+        cc_adapter.install(target, projects_dir=proj, force=True)
+        body_3 = (target / "CLAUDE.md").read_text(encoding="utf-8")
+        # Only one begin-marker in the file
+        assert body_3.count("mnemosyne-adapter:begin") == 1
+    finally:
+        shutil.rmtree(proj)
+        shutil.rmtree(target)
+
+
+@test("adapter-claude-code: uninstall removes our additions + preserves user content")
+def _():
+    proj = _tmp_projects_dir()
+    target = _tmp_projects_dir()
+    try:
+        user_content = "# My project\n\nUser notes.\n"
+        (target / "CLAUDE.md").write_text(user_content, encoding="utf-8")
+        cc_adapter.install(target, projects_dir=proj)
+        cc_adapter.uninstall(target)
+        # User content survives
+        body = (target / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "User notes" in body
+        assert "mnemosyne-adapter:begin" not in body
+        # Hooks dir gone
+        assert not (target / ".claude" / "mnemosyne").exists()
+    finally:
+        shutil.rmtree(proj)
+        shutil.rmtree(target)
+
+
+@test("adapter-claude-code: status reports correct presence flags")
+def _():
+    proj = _tmp_projects_dir()
+    target = _tmp_projects_dir()
+    try:
+        s_before = cc_adapter.status(target)
+        assert not s_before["claude_md_has_mnemosyne_block"]
+        assert not s_before["hooks_installed"]
+
+        cc_adapter.install(target, projects_dir=proj)
+        s_after = cc_adapter.status(target)
+        assert s_after["claude_md_has_mnemosyne_block"]
+        assert s_after["hooks_installed"]
+        assert s_after["settings_present"]
+    finally:
+        shutil.rmtree(proj)
+        shutil.rmtree(target)
+
+
+@test("adapter-claude-code: install merges into existing settings.json hooks")
+def _():
+    proj = _tmp_projects_dir()
+    target = _tmp_projects_dir()
+    try:
+        (target / ".claude").mkdir(parents=True)
+        existing = {
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command",
+                                 "command": "./user-hook.sh"}]}
+                ]
+            }
+        }
+        (target / ".claude" / "settings.json").write_text(
+            json.dumps(existing, indent=2), encoding="utf-8"
+        )
+        cc_adapter.install(target, projects_dir=proj)
+        merged = json.loads(
+            (target / ".claude" / "settings.json").read_text(encoding="utf-8")
+        )
+        stop_cmds = [h["command"]
+                      for entry in merged["hooks"]["Stop"]
+                      for h in entry.get("hooks") or []]
+        # User's pre-existing hook preserved + ours added
+        assert "./user-hook.sh" in stop_cmds
+        assert any(".claude/mnemosyne/hooks/on_stop.sh" in c
+                   for c in stop_cmds)
+    finally:
+        shutil.rmtree(proj)
+        shutil.rmtree(target)
 
 
 # =============================================================================

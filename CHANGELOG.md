@@ -2,6 +2,59 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.5.0] — 2026-04-16 — agentic-stack borrows + article
+
+Three narrow ideas borrowed from codejunkie99/agentic-stack (MIT,
+attributed), and the first full-length article telling the Mnemosyne
+story.
+
+**`mnemosyne_permissions.py`** — user-editable permission model.
+  `$PROJECTS_DIR/permissions.md` is a markdown file declaring
+  allowed_skills, denied_skills, forbidden_paths, and per-skill
+  rate_limits (N/sec | min | hour). BrainConfig gains
+  `enforce_permissions: bool = False` (opt-in). When on, every
+  skill dispatch checks against permissions + rolling-window rate
+  limiter; denied skills return `{"error": "permission_denied"}`
+  and log a `permission_denied` telemetry event. Allow-list mode
+  activates automatically when allowed_skills is non-empty;
+  otherwise denied_skills is enforced against a permissive default.
+
+**`MemoryStore.export_to_git(target_dir)`** + new `mnemosyne-memory
+export --to-git <path>` subcommand — dumps L2+L3 memories to a
+shadow git repo as one `<tier>/<id>-<slug>.md` file per memory,
+each with yaml-ish frontmatter. Initializes the repo on first
+export + commits with a generated "Mnemosyne Autobiography" identity.
+Browsable, diffable, shareable, survives uninstall. Inspired by
+agentic-stack's "git history of .agent/memory/ as autobiography."
+
+**`mnemosyne_adapter_claude_code.py`** + new
+`mnemosyne-adapter-claude-code` CLI (install / status / uninstall).
+Non-destructively installs into an existing project: appends a
+delimited `mnemosyne-adapter:begin` block to CLAUDE.md, writes
+.claude/mnemosyne/hooks/ for session-start and stop hooks, merges
+hooks into .claude/settings.json (preserves existing), symlinks
+memory.db so Claude Code sessions read the same ICMS. Uninstall
+removes exactly what install wrote — user content preserved.
+Enables Claude Code users to adopt Mnemosyne's memory + identity
+lock + permissions without switching tools.
+
+**`docs/ARTICLE.md`** — 587-line working-engineer's report on
+building Mnemosyne. What we shipped, what broke, what we stole,
+seven opinions formed while building. Intentionally honest:
+"refuse to call it consciousness," explicit limitations section,
+concrete v0.6 → v1.0 roadmap.
+
+Tests: 228 → 246 green. 18 new:
+  - 7 permissions tests (parse, allow-list, deny-list, paths, rate
+    limits, empty file, load; brain integration)
+  - 3 export tests (file structure, --since filter, git-missing
+    safety)
+  - 8 adapter tests (install / non-destructive / idempotent /
+    uninstall / status / merge-existing-settings)
+
+Packaging: 22nd console script (`mnemosyne-adapter-claude-code`).
+CI install-smoke updated to 22 entry points + 3 new library imports.
+
 ## [0.4.1] — 2026-04-15 — bidirectional avatar + concurrency crush
 
 The avatar stops being observation-only. Observable state now feeds

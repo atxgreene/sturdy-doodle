@@ -518,6 +518,125 @@ class MemoryStore:
             "schema_version": self.SCHEMA_VERSION,
         }
 
+    # ---- git-backed autobiography export -----------------------------------
+
+    def export_to_git(
+        self,
+        target_dir: Path,
+        *,
+        tier_min: int = L2_WARM,
+        since: str | None = None,
+    ) -> dict[str, Any]:
+        """Dump memories to a directory as markdown files + git commit.
+
+        Each memory becomes one `<tier>/<id>-<slug>.md` file with yaml-ish
+        frontmatter and the content as the body. The target directory is
+        initialized as a git repo on first export; subsequent exports
+        amend the repo with new commits — a browsable agent autobiography.
+
+        Inspired by agentic-stack's "git history of .agent/memory/ as
+        the agent's autobiography" pattern. Works without git installed
+        (just skips the commit step) but is much more useful with it.
+
+        Returns {"count", "repo", "commit" (optional)}.
+        """
+        import re as _re
+        import shutil as _sh
+        import subprocess as _sp
+        target_dir = Path(target_dir).expanduser().resolve()
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize git repo if the target isn't already one. Configure
+        # user identity locally so `git commit` works even when the
+        # system has no global git config (CI, containers, fresh VMs).
+        git_ok = _sh.which("git") is not None
+        is_git = (target_dir / ".git").exists()
+        if git_ok and not is_git:
+            _sp.run(["git", "init", "--quiet", "--initial-branch=main"],
+                    cwd=str(target_dir), capture_output=True)
+            _sp.run(["git", "config", "user.email",
+                     "autobiography@mnemosyne.local"],
+                    cwd=str(target_dir), capture_output=True)
+            _sp.run(["git", "config", "user.name",
+                     "Mnemosyne Autobiography"],
+                    cwd=str(target_dir), capture_output=True)
+
+        # Query memories
+        with self._lock:
+            sql = ("SELECT id, created_utc, updated_utc, source, tier, kind, "
+                   "content, metadata_json, access_count "
+                   "FROM memories WHERE tier >= ?")
+            params: list[Any] = [tier_min]
+            if since:
+                sql += " AND created_utc >= ?"
+                params.append(since)
+            sql += " ORDER BY created_utc ASC"
+            rows = self._conn.execute(sql, params).fetchall()
+
+        # Write each memory as a markdown file under tier subdir
+        count = 0
+        for r in rows:
+            tier = r["tier"]
+            tier_dir = target_dir / f"L{tier}"
+            tier_dir.mkdir(parents=True, exist_ok=True)
+            # Slug from first ~8 words of content
+            slug_src = (r["content"] or "").split()[:8]
+            slug = "-".join(_re.sub(r"[^a-zA-Z0-9]+", "", w)
+                            for w in slug_src).lower()[:40] or "memory"
+            fname = f"{r['id']:06d}-{slug}.md"
+            fpath = tier_dir / fname
+            fm = [
+                "---",
+                f"id: {r['id']}",
+                f"tier: L{r['tier']}",
+                f"kind: {r['kind']}",
+                f"source: {r['source']}",
+                f"created_utc: {r['created_utc']}",
+                f"updated_utc: {r['updated_utc']}",
+                f"access_count: {r['access_count']}",
+                "---",
+                "",
+                r["content"] or "",
+                "",
+            ]
+            fpath.write_text("\n".join(fm), encoding="utf-8")
+            count += 1
+
+        # Commit — only if git is available AND there's content to commit
+        commit_sha: str | None = None
+        if git_ok and (target_dir / ".git").exists() and count:
+            _sp.run(["git", "add", "-A"], cwd=str(target_dir),
+                    capture_output=True)
+            # Ensure identity is set (pre-existing repos may have no config)
+            check = _sp.run(["git", "config", "user.email"],
+                             cwd=str(target_dir), capture_output=True,
+                             text=True)
+            if not check.stdout.strip():
+                _sp.run(["git", "config", "user.email",
+                         "autobiography@mnemosyne.local"],
+                        cwd=str(target_dir), capture_output=True)
+                _sp.run(["git", "config", "user.name",
+                         "Mnemosyne Autobiography"],
+                        cwd=str(target_dir), capture_output=True)
+            now_iso = _utcnow()
+            r = _sp.run(
+                ["git", "commit", "-m",
+                 f"export: {count} memories ({now_iso})"],
+                cwd=str(target_dir), capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                rr = _sp.run(["git", "rev-parse", "--short", "HEAD"],
+                             cwd=str(target_dir), capture_output=True,
+                             text=True)
+                commit_sha = rr.stdout.strip() or None
+
+        return {
+            "count": count,
+            "repo": str(target_dir),
+            "commit": commit_sha,
+            "git_available": git_ok,
+        }
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -567,6 +686,16 @@ def _main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("stats", help="show memory statistics")
 
+    ep = sub.add_parser("export",
+                          help="export memories to a git-backed "
+                               "autobiography (one markdown file per row)")
+    ep.add_argument("--to-git", required=True,
+                     help="target directory; initialized as a git repo if new")
+    ep.add_argument("--tier-min", type=int, default=2,
+                     help="lowest tier to include (default: 2 = L2 warm and up)")
+    ep.add_argument("--since", default=None,
+                     help="ISO date; only export memories newer than this")
+
     args = p.parse_args(argv)
     mem = MemoryStore(path=args.db)
 
@@ -578,6 +707,12 @@ def _main(argv: list[str] | None = None) -> int:
             print(f"[L{r['tier']}] {r['content']}  ({r['kind']}, {r['source']})")
     elif args.cmd == "stats":
         print(json.dumps(mem.stats(), indent=2, default=str))
+    elif args.cmd == "export":
+        result = mem.export_to_git(Path(args.to_git).expanduser(),
+                                     tier_min=args.tier_min,
+                                     since=args.since)
+        print(f"exported {result['count']} memories to {result['repo']}")
+        print(f"commit: {result.get('commit', 'no commit (git not available)')}")
     return 0
 
 

@@ -193,6 +193,13 @@ class BrainConfig:
     # visualization. Off by default; opt-in.
     avatar_feedback: bool = False
 
+    # Permissions gate: when True, the brain loads
+    # $PROJECTS_DIR/permissions.md and checks every skill dispatch
+    # against the allow/deny lists + per-skill rate limits. See
+    # mnemosyne_permissions. Off by default (all skills allowed) but
+    # strongly recommended for any production deployment.
+    enforce_permissions: bool = False
+
 
 # ---- brain ------------------------------------------------------------------
 
@@ -433,6 +440,31 @@ class Brain:
                     tool_result: Any = {"error": f"unknown skill: {name}"}
                     status = "error"
                 else:
+                    # Permissions gate — consult permissions.md before
+                    # any skill invocation. See mnemosyne_permissions.
+                    perm_ok, perm_reason = self._check_permissions(name)
+                    if not perm_ok:
+                        tool_result = {"error": "permission_denied",
+                                        "reason": perm_reason,
+                                        "skill": name}
+                        status = "error"
+                        self._log(
+                            "permission_denied",
+                            tool=name, args=args, status="error",
+                            metadata={"reason": perm_reason},
+                            parent_event_id=parent_evt,
+                        )
+                        self._total_tool_calls += 1
+                        all_tool_calls.append({"name": name, "args": args,
+                                                "result": tool_result})
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id"),
+                            "name": name,
+                            "content": json.dumps(tool_result,
+                                                    default=str),
+                        })
+                        continue
                     t0 = time.monotonic()
                     try:
                         tool_result = skill.invoke(**(args if isinstance(args, dict) else {}))
@@ -631,6 +663,41 @@ class Brain:
         )
 
     # ---- dreams -------------------------------------------------------------
+
+    def _check_permissions(self, skill_name: str) -> tuple[bool, str]:
+        """Consult permissions.md + rate limits. Returns (ok, reason).
+
+        Safe no-op (allows everything) when enforce_permissions=False
+        or when permissions.md is absent.
+        """
+        if not self.config.enforce_permissions:
+            return True, ""
+        # Load lazily + cache per-Brain so we don't re-parse every turn
+        perms = getattr(self, "_cached_permissions", None)
+        if perms is None:
+            try:
+                import mnemosyne_permissions as perm_mod
+                perms = perm_mod.load()
+                self._cached_permissions = perms
+                self._permissions_rate = perm_mod._RollingRateLimiter()
+            except Exception:
+                return True, ""
+        ok, reason = perms.is_skill_allowed(skill_name)
+        if not ok:
+            return False, reason
+        # Rate-limit check
+        rate = perms.rate_limits.get(skill_name)
+        if rate is not None:
+            count, window = rate
+            rl = getattr(self, "_permissions_rate", None)
+            if rl is None:
+                import mnemosyne_permissions as perm_mod
+                rl = perm_mod._RollingRateLimiter()
+                self._permissions_rate = rl
+            ok, reason = rl.check(skill_name, count, window)
+            if not ok:
+                return False, reason
+        return True, ""
 
     def _apply_avatar_feedback(self, *, parent_evt: str | None) -> None:
         """Read current avatar state and let its rules mutate self.config.

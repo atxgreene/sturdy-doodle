@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.4.1"
+version = "0.5.0"
 description = "Local-first LLM agent framework: ICMS 3-tier memory, 19 model backends, 4-layer identity lock, evolving avatar dashboard. Stdlib only."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -94,6 +94,7 @@ mnemosyne-batch        = "mnemosyne_batch:_main"
 mnemosyne-datagen      = "mnemosyne_datagen:_main"
 mnemosyne-avatar       = "mnemosyne_avatar:_main"
 mnemosyne-resolver     = "mnemosyne_resolver:_main"
+mnemosyne-adapter-claude-code = "mnemosyne_adapter_claude_code:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -150,6 +151,10 @@ py-modules = [
     "mnemosyne_avatar",
     # v0.3.5 routing-layer audit (Tan "Resolvers" 2026)
     "mnemosyne_resolver",
+    # v0.5.0 borrows from agentic-stack:
+    #   user-editable permission model + harness adapter pattern
+    "mnemosyne_permissions",
+    "mnemosyne_adapter_claude_code",
 ]
 
 # mnemosyne_ui is a real package (has __init__.py) so its static

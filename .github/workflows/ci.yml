@@ -98,7 +98,7 @@ jobs:
           python3 -m venv /tmp/ci-venv
           /tmp/ci-venv/bin/pip install --quiet --upgrade pip
           /tmp/ci-venv/bin/pip install -e .
-      - name: Verify all 21 entry points land on $PATH
+      - name: Verify all 22 entry points land on $PATH
         run: |
           # Stable v0.2.x surface
           for cmd in mnemosyne-experiments mnemosyne-pipeline \
@@ -107,14 +107,15 @@ jobs:
                     harness-telemetry mnemosyne-triage; do
             [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
           done
-          # v0.2.0+ rigor pass + v0.3.x UI / resolver
+          # v0.2.0+ rigor pass + v0.3.x UI / resolver + v0.5.0 adapter
           for cmd in mnemosyne-proposer mnemosyne-dreams mnemosyne-apply \
                     mnemosyne-scengen mnemosyne-goals mnemosyne-mcp \
                     mnemosyne-serve mnemosyne-train mnemosyne-batch \
-                    mnemosyne-datagen mnemosyne-avatar mnemosyne-resolver; do
+                    mnemosyne-datagen mnemosyne-avatar mnemosyne-resolver \
+                    mnemosyne-adapter-claude-code; do
             [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
           done
-          echo "all 21 entry points installed"
+          echo "all 22 entry points installed"
       - name: Verify library imports without sys.path shims
         run: |
           /tmp/ci-venv/bin/python3 -c "
@@ -139,7 +140,9 @@ jobs:
           from mnemosyne_skills_builtin import register_builtin_skills
           from mnemosyne_mcp import MCPClient, serve_stdio
           from mnemosyne_resolver import check_resolvable, ResolverReport
-          print('all 21+ library surfaces import cleanly')
+          from mnemosyne_permissions import Permissions, parse, load
+          from mnemosyne_adapter_claude_code import install, uninstall, status
+          print('all 23+ library surfaces import cleanly')
           "
       - name: Verify UI static assets ship with the package
         run: |
