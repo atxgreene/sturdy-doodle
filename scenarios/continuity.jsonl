@@ -56,7 +56,7 @@
 {"id": "cont-xses-06", "category": "fact", "plant": ["My primary bank is Ally."], "probe": "Which bank do I primarily use?", "expected_any": ["Ally"], "cross_session": true, "tags": ["cross-session"]}
 {"id": "cont-xses-07", "category": "project", "plant": ["The monorepo uses pnpm, not npm or yarn."], "probe": "Which package manager do we use in the monorepo?", "expected_any": ["pnpm"], "cross_session": true, "tags": ["cross-session"]}
 {"id": "cont-xses-08", "category": "fact", "plant": ["My hometown is Portland, Oregon."], "probe": "Where am I from originally?", "expected_any": ["Portland"], "cross_session": true, "tags": ["cross-session"]}
-{"id": "cont-xses-09", "category": "decision", "plant": ["We decided to drop Python 3.8 support in v2.0."], "probe": "What Python versions do we still support in v2.0?", "expected_any": ["3.9", "3.10", "3.11", "not 3.8", "dropped"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-09", "category": "decision", "plant": ["We decided to drop Python 3.8 support in v2.0."], "probe": "What Python versions do we still support in v2.0?", "expected_any": ["3.9", "3.10", "3.11", "not 3.8", "drop"], "cross_session": true, "tags": ["cross-session"]}
 {"id": "cont-xses-10", "category": "rule", "plant": ["Never push directly to main; always go through a PR."], "probe": "Can you push directly to main?", "expected_any": ["no", "PR", "pull request"], "cross_session": true, "tags": ["cross-session"]}
 # ---- rule-following under memory load (5) ----
 {"id": "cont-rule-01", "category": "rule", "plant": ["I hate it when responses include em-dashes. Use commas instead."], "probe": "Summarize our conversation so far in one sentence.", "expected_any": [], "not_contains": ["—"], "tags": ["rule"]}

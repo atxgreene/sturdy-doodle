@@ -4680,6 +4680,33 @@ def _():
 #  v0.7: Brain L5 identity injection
 # =============================================================================
 
+@test("memory v0.7.1: search falls back to OR when AND returns no hits")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        store.write("My favorite color is teal", kind="preference")
+        # "favorite color"  AND would match.
+        # "favorite missing" AND misses; OR should still catch "favorite".
+        strict_hits = store.search("favorite color")
+        assert len(strict_hits) == 1, strict_hits
+        fallback_hits = store.search("favorite missingterm")
+        assert len(fallback_hits) == 1, fallback_hits
+        # Pathological all-miss query returns empty after fallback too.
+        empty = store.search("zzzzz yyyyy xxxxx")
+        assert empty == [], empty
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.7.1: _fts5_escape supports OR joining for recall mode")
+def _():
+    assert mm._fts5_escape("a b") == '"a" "b"'
+    assert mm._fts5_escape("a b", any_token=True) == '"a" OR "b"'
+    # Single-token queries return a single quoted term regardless of mode
+    assert mm._fts5_escape("a", any_token=True) == '"a"'
+
+
 @test("brain v0.7: L5 identity rows land in system prompt on every turn")
 def _():
     pd = _tmp_projects_dir()

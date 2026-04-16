@@ -453,38 +453,57 @@ class MemoryStore:
 
         Uses FTS5 if available, falls back to LIKE substring match otherwise.
         `tier_max` restricts to tiers ≤ N (e.g. tier_max=2 excludes L3 cold).
+
+        Two-pass recall (v0.7.1):
+          1. Strict AND — every query term must match the same row.
+             High precision; preferred when the AND set is non-empty.
+          2. OR fallback — if AND returns zero, relax to OR across
+             terms. Rescues probes where one query word is absent
+             from the indexed doc (e.g. probe "What cache are we
+             using?" against plant "... for the session cache."
+             where "using" never got planted). BM25 ranking still
+             prioritizes docs that match multiple terms.
+
+        Fallback is transparent — callers get the best of both
+        without changing call sites. The strength boost is applied
+        on whichever pass returns rows.
         """
         results: list[dict[str, Any]] = []
+
+        def _run_fts(match_expr: str) -> list[Any]:
+            sql = """
+                SELECT m.*, memories_fts.rank AS relevance
+                FROM memories_fts
+                JOIN memories m ON m.id = memories_fts.rowid
+                WHERE memories_fts MATCH ?
+            """
+            params: list[Any] = [match_expr]
+            if tier_max is not None:
+                sql += " AND m.tier <= ?"
+                params.append(tier_max)
+            if kind:
+                sql += " AND m.kind = ?"
+                params.append(kind)
+            if source:
+                sql += " AND m.source = ?"
+                params.append(source)
+            # v0.7: rank multiplied by memory strength so reinforced
+            # memories naturally outrank unused ones.
+            sql += (" ORDER BY memories_fts.rank * "
+                    "(1.0 + m.strength) LIMIT ?")
+            params.append(limit)
+            return self._conn.execute(sql, params).fetchall()
+
         with self._lock:
             if self._has_fts5 and query.strip():
-                sql = """
-                    SELECT m.*, memories_fts.rank AS relevance
-                    FROM memories_fts
-                    JOIN memories m ON m.id = memories_fts.rowid
-                    WHERE memories_fts MATCH ?
-                """
-                params: list[Any] = [_fts5_escape(query)]
-                if tier_max is not None:
-                    sql += " AND m.tier <= ?"
-                    params.append(tier_max)
-                if kind:
-                    sql += " AND m.kind = ?"
-                    params.append(kind)
-                if source:
-                    sql += " AND m.source = ?"
-                    params.append(source)
-                # v0.7: rank multiplied by memory strength so reinforced
-                # memories naturally outrank unused ones. FTS5 rank is
-                # negative (lower = more relevant); multiplying by
-                # (1 + strength) preserves FTS5's ranking within a tier
-                # while boosting stronger rows.
-                sql += (" ORDER BY memories_fts.rank * "
-                        "(1.0 + m.strength) LIMIT ?")
-                params.append(limit)
+                rows = _run_fts(_fts5_escape(query, any_token=False))
+                if not rows:
+                    # OR fallback: widen recall when strict AND missed
+                    rows = _run_fts(_fts5_escape(query, any_token=True))
             else:
-                # Fallback: LIKE scan
+                # Fallback: LIKE scan (FTS5 unavailable or empty query)
                 sql = "SELECT *, 0.0 AS relevance FROM memories WHERE 1=1"
-                params = []
+                params: list[Any] = []
                 if query.strip():
                     sql += " AND content LIKE ?"
                     params.append(f"%{query}%")
@@ -499,8 +518,7 @@ class MemoryStore:
                     params.append(source)
                 sql += " ORDER BY last_accessed_utc DESC NULLS LAST, created_utc DESC LIMIT ?"
                 params.append(limit)
-
-            rows = self._conn.execute(sql, params).fetchall()
+                rows = self._conn.execute(sql, params).fetchall()
             # Touch access_count + last_accessed_utc + reinforce strength
             # (Hebbian: used memories strengthen asymptotically toward 1.0)
             now = _utcnow()
@@ -837,16 +855,26 @@ class MemoryStore:
         self.close()
 
 
-def _fts5_escape(query: str) -> str:
+def _fts5_escape(query: str, *, any_token: bool = False) -> str:
     """Escape an FTS5 query string to avoid syntax errors on user input.
 
     Quotes each term as a phrase so operators in user input don't break.
     Empty input returns '""' which FTS5 treats as no-match.
+
+    any_token=False  →  AND semantics (space-separated terms)
+    any_token=True   →  OR  semantics (`"a" OR "b" OR "c"`)
+
+    OR mode is used as a recall fallback by `MemoryStore.search()` when
+    strict AND returns zero rows. Callers rarely need to pick a mode
+    directly.
     """
     tokens = [t for t in query.split() if t]
     if not tokens:
         return '""'
-    return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+    quoted = ['"' + t.replace('"', '""') + '"' for t in tokens]
+    if any_token and len(quoted) > 1:
+        return " OR ".join(quoted)
+    return " ".join(quoted)
 
 
 # ---- CLI (smoke test) -------------------------------------------------------

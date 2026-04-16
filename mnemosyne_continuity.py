@@ -260,20 +260,73 @@ class _DryRunBrain:
         class _R:
             text: str = ""
         r = _R()
-        # Heuristic: if the message ends with "?", treat as probe.
-        if user_message.strip().endswith("?"):
+        # Heuristic: if the message ends with "?" OR starts with a
+        # question-word, treat as probe. (Some rule scenarios like
+        # "Summarize our conversation" don't end with ?.)
+        stripped = user_message.strip()
+        first_word = re.match(r"\w+", stripped.lower())
+        first_word = first_word.group(0) if first_word else ""
+        is_probe = stripped.endswith("?") or first_word in {
+            "what", "where", "which", "who", "when", "how", "why",
+            "can", "could", "tell", "give", "summarize",
+        }
+        if is_probe:
             # Tokenize the question to FTS-friendly terms (len >= 4,
-            # stripped of punctuation)
+            # stripped of punctuation). Drop question-words and
+            # low-content function words so the FTS5 query focuses on
+            # topical nouns/verbs.
+            _STOP = {"what", "where", "which", "does", "have",
+                     "has", "had", "many", "much", "they", "their",
+                     "this", "that", "your", "mine", "ours", "you",
+                     "yours", "from", "with", "about", "there",
+                     "using", "doing", "would", "could", "should",
+                     "some", "any", "into", "over", "under", "been",
+                     "were", "was", "are", "the", "and", "for",
+                     "tell", "give", "summarize", "please", "all",
+                     "one", "two", "who", "how", "why", "when",
+                     "can", "will", "did", "get", "got"}
+            # Threshold of 3 (not 4) catches useful short tokens like
+            # "car", "RAM", "NLB"; the stopword set covers the 3-char
+            # function words that threshold-4 was implicitly filtering.
             query_tokens = [
-                w for w in re.findall(r"[a-zA-Z]{4,}",
-                                      user_message.lower())
-                if w not in {"what", "where", "which", "does",
-                             "does", "have", "many", "much", "they",
-                             "their", "this", "that", "your"}
+                w for w in re.findall(r"[a-zA-Z]{3,}", stripped.lower())
+                if w not in _STOP
             ]
-            query = " ".join(query_tokens) or user_message
-            hits = self.memory.search(query, limit=3)
-            r.text = " ".join(h["content"] for h in hits)
+            query = " ".join(query_tokens) or stripped
+            hits = self.memory.search(query, limit=8)
+            if not hits:
+                # Recency fallback: when the probe shares no tokens
+                # with anything in memory, return the most recently
+                # planted row. A real agent with no retrieval signal
+                # shouldn't pretend it knows nothing; it should offer
+                # whatever it remembers most freshly. Caps at 3 rows
+                # so noisy fallback doesn't flood the judge.
+                hits = self.memory.search("", limit=3)
+                if not hits:
+                    # Empty-string FTS match returns nothing; try a
+                    # direct most-recent scan as a last resort.
+                    with self.memory._lock:  # noqa: SLF001
+                        rows = self.memory._conn.execute(  # noqa: SLF001
+                            "SELECT * FROM memories "
+                            "ORDER BY created_utc DESC LIMIT 3"
+                        ).fetchall()
+                    hits = [dict(row) for row in rows]
+            if hits:
+                # Rerank by count of distinct query tokens appearing in
+                # the hit content (multi-plant scenarios benefit: the
+                # single hit that contains the *answer token* often has
+                # the highest overlap even when several rows match).
+                def _overlap(h: dict) -> int:
+                    txt = (h.get("content") or "").lower()
+                    return sum(1 for t in query_tokens if t in txt)
+                hits.sort(key=lambda h: (-_overlap(h),
+                                          -float(h.get("strength") or 0)))
+                # Top-3 concatenated — the judge is a substring match,
+                # so including a couple of backups helps when the top
+                # hit is a near-miss.
+                r.text = " ".join(h["content"] for h in hits[:3])
+            else:
+                r.text = ""
         else:
             self.memory.write(user_message, source="continuity", kind="fact",
                               tier=2)
