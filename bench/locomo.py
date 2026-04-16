@@ -80,14 +80,28 @@ class MnemosyneSubstrate:
         context = "\n".join(h["content"] for h in hits[:5])
         if not self.llm_grounded:
             return context
-        # TODO: pass context as system prompt + question as user message
-        # to mnemosyne_models.chat() with the configured backend.
-        # Left intentionally unwired so the runner is portable.
-        raise NotImplementedError(
-            "llm_grounded mode requires a configured backend. "
-            "Wire mnemosyne_models.chat() here once you've picked "
-            "the model + provider you want to publish numbers for."
-        )
+        # Live mode: ask the configured backend to answer the question
+        # using retrieved context as system grounding. Late-imported so
+        # the substrate-only path doesn't pay the cost.
+        import mnemosyne_models as mm_models  # type: ignore
+        if not self.provider or not self.model:
+            raise RuntimeError(
+                "llm_grounded=True requires --provider and --model. "
+                "For LM Studio: --provider lmstudio --model <id>."
+            )
+        backend = mm_models.Backend(provider=self.provider,
+                                     default_model=self.model)
+        messages = [
+            {"role": "system",
+             "content": (
+                 "You are answering questions about a long conversation. "
+                 "Use ONLY the retrieved context below. If the answer "
+                 "isn't in the context, say you don't know.\n\n"
+                 "## Retrieved context\n\n" + (context or "(empty)"))},
+            {"role": "user", "content": question},
+        ]
+        resp = mm_models.chat(messages, backend=backend)
+        return (resp.get("text") or "").strip()
 
     def close(self) -> None:
         self.memory.close()

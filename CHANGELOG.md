@@ -2,6 +2,47 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.8.1] — 2026-04-16 — launch docs + LM Studio bench wiring
+
+Documentation and marketing batch. Gets the v0.8.0 substrate ready
+to publicly launch: a runnable 12-component harness audit doc,
+long-form and thread-form launch articles, and a fully wired LM
+Studio path so users with a local model can produce real Continuity
+Score numbers against their own hardware in one command.
+
+**New docs**
+- `docs/HARNESS.md` — Mnemosyne ↔ Akshay Pachaar's 12-component
+  agent-harness audit. Table with status + verify command per row.
+  9 ✓, 3 partial (context masking, error taxonomy, per-turn
+  verification; all tracked for v0.9). Screenshot-ready for
+  articles and PRs; no quiet upgrades, same gatekeeping rules as
+  `docs/COGNITIVE_OS.md`.
+- `docs/articles/v0.8-launch-substack.md` — ~1500-word launch
+  essay. Narrative: "we built it before there was a name for it"
+  with git-log receipts from April 7-16. References HARNESS.md and
+  COGNITIVE_OS.md for the actual audit substance.
+- `docs/articles/v0.8-x-thread.md` — 12-tweet launch thread +
+  bonus quote-card lines for week-long amplification + tagging
+  strategy + "what not to post" guardrails.
+
+**`bench/locomo.py` — LLM-grounded mode wired**
+- `MnemosyneSubstrate.probe()` no longer raises NotImplementedError
+  in `llm_grounded=True` mode. Uses retrieved context as system
+  prompt, asks `mnemosyne_models.chat(...)` via the configured
+  backend. Works with any of the 19 supported providers; LM Studio
+  is the default target for local runs.
+- `bench/README.md` rewritten with an LM Studio quick-path that
+  skips the optional venv entirely — `mnemosyne-continuity run
+  --provider lmstudio --model <id>` is the one-liner to get a real
+  benchmark number against your local model tonight.
+
+**Packaging**
+- `pyproject.toml` 0.8.0 → 0.8.1 (docs-only patch bump; no API or
+  behavior changes).
+- No new modules, no new entry points. CI install-smoke unchanged.
+
+**Tests:** 279/279 green (unchanged). pyflakes clean.
+
 ## [0.8.0] — 2026-04-16 — Instinct overlay + compactor audit + bench skeleton
 
 Adds the **Instinct overlay** — a fast-path layer of distilled

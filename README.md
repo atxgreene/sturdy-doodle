@@ -1,8 +1,18 @@
 # Mnemosyne
 
+![hero](docs/images/hero-owl-banner.png)
+
 **A cognitive OS for local-first agents. Stdlib only. One pip install away.**
 
-*All five rows of the [cognitive-OS checklist](./docs/COGNITIVE_OS.md) are ✓ as of v0.7.0 — each backed by a [verify command](./docs/VISION.md). Not marketing; audit it yourself.*
+*All five rows of the [cognitive-OS checklist](./docs/COGNITIVE_OS.md) are ✓ as of v0.7.0; the [12-component agent harness audit](./docs/HARNESS.md) is 9 ✓ + 3 partial as of v0.8.0 — each row backed by a verify command. Not marketing; audit it yourself.*
+
+## Architecture at a glance
+
+![architecture](docs/images/architecture-overview.png)
+
+Channels (REST/CLI/Telegram/Slack/Discord/Avatar UI) → Brain (context assembly + identity lock) → Tool Executor + 19-provider Model Backend. ICMS 5-tier memory (L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity), Inner Dialogue (Planner/Critic/Doer/Evaluator), Dream Consolidation, Meta-Harness self-improvement loop. All data lives as plain SQLite + JSONL + Markdown — your knowledge survives without the framework.
+
+## Live dashboard
 
 ![dashboard](docs/dashboard.png)
 
