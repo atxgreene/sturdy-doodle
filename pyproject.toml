@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.7.0"
-description = "Local-first LLM agent framework: ICMS 3-tier memory, 19 model backends, 4-layer identity lock, evolving avatar dashboard. Stdlib only."
+version = "0.9.3"
+description = "Local-first LLM agent framework: ICMS 6-tier memory with Reflection → Instinct loop, 19 model backends, 4-layer identity lock, evolving avatar dashboard. Stdlib only."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
@@ -59,15 +59,15 @@ train = [
 ]
 
 [project.urls]
-Homepage      = "https://github.com/atxgreene/sturdy-doodle"
-Repository    = "https://github.com/atxgreene/sturdy-doodle"
-Documentation = "https://github.com/atxgreene/sturdy-doodle/tree/main/docs"
-Issues        = "https://github.com/atxgreene/sturdy-doodle/issues"
-Changelog     = "https://github.com/atxgreene/sturdy-doodle/blob/main/CHANGELOG.md"
-Quickstart    = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/QUICKSTART.md"
-Architecture  = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/ARCHITECTURE.md"
-Roadmap       = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/ROADMAP.md"
-Benchmarks    = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/BENCHMARKS.md"
+Homepage      = "https://github.com/atxgreene/Mnemosyne"
+Repository    = "https://github.com/atxgreene/Mnemosyne"
+Documentation = "https://github.com/atxgreene/Mnemosyne/tree/main/docs"
+Issues        = "https://github.com/atxgreene/Mnemosyne/issues"
+Changelog     = "https://github.com/atxgreene/Mnemosyne/blob/main/CHANGELOG.md"
+Quickstart    = "https://github.com/atxgreene/Mnemosyne/blob/main/docs/QUICKSTART.md"
+Architecture  = "https://github.com/atxgreene/Mnemosyne/blob/main/docs/ARCHITECTURE.md"
+Roadmap       = "https://github.com/atxgreene/Mnemosyne/blob/main/docs/ROADMAP.md"
+Benchmarks    = "https://github.com/atxgreene/Mnemosyne/blob/main/docs/BENCHMARKS.md"
 
 # Each entry below creates an executable command on $PATH after `pip install`.
 # The command name on the left stays hyphenated (UX); the module target on the
@@ -97,6 +97,7 @@ mnemosyne-resolver     = "mnemosyne_resolver:_main"
 mnemosyne-adapter-claude-code = "mnemosyne_adapter_claude_code:_main"
 mnemosyne-compactor    = "mnemosyne_compactor:_main"
 mnemosyne-continuity   = "mnemosyne_continuity:_main"
+mnemosyne-instinct     = "mnemosyne_instinct:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -165,6 +166,12 @@ py-modules = [
     # See docs/BENCHMARKS_v0.7.md.
     "mnemosyne_compactor",
     "mnemosyne_continuity",
+    # v0.8.0 introduced user-pattern distillation as an L4 overlay;
+    # v0.9.0 promoted it to its own tier, L0_INSTINCT. Brain injects
+    # L0 rows into the system prompt on every turn as a fast-path
+    # layer populated by the Reflection → Instinct loop. See
+    # docs/ARCHITECTURE.md.
+    "mnemosyne_instinct",
 ]
 
 # mnemosyne_ui is a real package (has __init__.py) so its static

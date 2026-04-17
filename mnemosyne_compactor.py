@@ -261,6 +261,82 @@ def compact_patterns(
     }
 
 
+def audit_patterns(
+    store: MemoryStore | None = None,
+    *,
+    dead_age_days: int = 30,
+) -> dict[str, Any]:
+    """Audit L4 pattern quality. Returns hit-rate, dead-pattern fraction,
+    average age, and per-pattern detail.
+
+    A "dead" pattern is one with zero accesses since promotion AND older
+    than `dead_age_days`. The Mem0 community reportedly hits 97% junk
+    accumulation in production audits without strict rules — this gives
+    us a measurable signal so the same failure mode doesn't sneak up on
+    Mnemosyne. Triage can cluster on a high dead-fraction as a drift
+    signal.
+    """
+    if store is None:
+        store = MemoryStore()
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=dead_age_days)
+
+    with store._lock:  # noqa: SLF001
+        rows = store._conn.execute(  # noqa: SLF001
+            "SELECT id, content, created_utc, last_accessed_utc, "
+            "access_count, strength, metadata_json "
+            "FROM memories WHERE tier = ? AND kind = 'pattern' "
+            "ORDER BY created_utc DESC",
+            (L4_PATTERN,),
+        ).fetchall()
+
+    total = len(rows)
+    hit = 0           # access_count > 0
+    dead = 0          # zero accesses AND older than cutoff
+    age_seconds: list[float] = []
+    cluster_sizes: list[int] = []
+
+    for r in rows:
+        ac = int(r["access_count"] or 0)
+        if ac > 0:
+            hit += 1
+        try:
+            created = datetime.fromisoformat(
+                r["created_utc"].replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        age_seconds.append((now - created).total_seconds())
+        if ac == 0 and created < cutoff:
+            dead += 1
+        try:
+            meta = json.loads(r["metadata_json"] or "{}")
+            sz = meta.get("cluster_size")
+            if isinstance(sz, int):
+                cluster_sizes.append(sz)
+        except (ValueError, TypeError):
+            pass
+
+    avg_age_days = (
+        round(sum(age_seconds) / len(age_seconds) / 86400.0, 2)
+        if age_seconds else 0.0
+    )
+    avg_cluster_size = (
+        round(sum(cluster_sizes) / len(cluster_sizes), 2)
+        if cluster_sizes else 0.0
+    )
+
+    return {
+        "total_patterns": total,
+        "hit_count": hit,
+        "hit_rate": round(hit / total, 4) if total else 0.0,
+        "dead_count": dead,
+        "dead_fraction": round(dead / total, 4) if total else 0.0,
+        "avg_age_days": avg_age_days,
+        "avg_cluster_size": avg_cluster_size,
+        "dead_age_threshold_days": dead_age_days,
+    }
+
+
 # ---- CLI -------------------------------------------------------------------
 
 def _main(argv: list[str] | None = None) -> int:
@@ -282,6 +358,13 @@ def _main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("stats", help="show L4 pattern row counts + signatures")
 
+    ap = sub.add_parser(
+        "audit",
+        help="L4 pattern quality report: hit-rate, dead-fraction, age "
+             "(early-warning for the Mem0-style 97%-junk failure mode)",
+    )
+    ap.add_argument("--dead-age-days", type=int, default=30)
+
     args = p.parse_args(argv)
     path = Path(args.db) if args.db else _default_memory_path()
     store = MemoryStore(path=path)
@@ -295,6 +378,9 @@ def _main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
         )
         print(json.dumps(result, indent=2))
+    elif args.cmd == "audit":
+        report = audit_patterns(store, dead_age_days=args.dead_age_days)
+        print(json.dumps(report, indent=2))
     elif args.cmd == "stats":
         with store._lock:  # noqa: SLF001
             rows = store._conn.execute(  # noqa: SLF001

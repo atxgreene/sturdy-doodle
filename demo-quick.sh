@@ -12,6 +12,13 @@
 
 set -euo pipefail
 
+# Resolve repo root relative to this script so the demo works no
+# matter where the repo is cloned. Previously hardcoded to
+# /home/user/sturdy-doodle (which also reflected the pre-rename repo
+# name) — broken for every fresh install.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
+
 # Pause helper — makes the recording readable.
 pause() { sleep "${1:-0.8}"; }
 
@@ -131,11 +138,11 @@ pause 2
 say "7.  Verify: 213 unit tests, pyflakes clean, 21 console scripts, stdlib core"
 hr
 dim "  python3 tests/test_all.py"
-python3 /home/user/sturdy-doodle/tests/test_all.py 2>&1 | tail -1 | sed 's/^/  /'
+python3 "$REPO_ROOT/tests/test_all.py" 2>&1 | tail -1 | sed 's/^/  /'
 pause 0.4
 dim "  python3 -m pyflakes *.py"
 # shellcheck disable=SC2046  # find output is path-safe; project has no spaces
-python3 -m pyflakes $(find /home/user/sturdy-doodle -maxdepth 1 -name '*.py') 2>&1 \
+python3 -m pyflakes $(find "$REPO_ROOT" -maxdepth 1 -name '*.py') 2>&1 \
     && printf '  \033[1;32m✓\033[0m pyflakes clean\n' \
     || printf '  ✗ pyflakes found issues\n'
 pause 2
@@ -144,7 +151,7 @@ pause 2
 printf '\n\033[1;35m'
 cat <<'BANNER'
    ───────────────────────────────────────────────────
-         github.com/atxgreene/sturdy-doodle
+         github.com/atxgreene/Mnemosyne
          v0.3.5 · 213/213 tests · 21 console scripts
          dashboard at http://127.0.0.1:8484/ui
    ───────────────────────────────────────────────────

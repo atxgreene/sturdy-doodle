@@ -57,6 +57,7 @@ import mnemosyne_train as train_mod  # noqa: E402
 import mnemosyne_triage as tri  # noqa: E402
 import mnemosyne_compactor as compactor_mod  # noqa: E402
 import mnemosyne_continuity as continuity_mod  # noqa: E402
+import mnemosyne_instinct as instinct_mod  # noqa: E402
 import scenario_runner as sr  # noqa: E402
 
 
@@ -3253,9 +3254,58 @@ def _():
         assert svg.startswith("<svg")
         assert svg.endswith("</svg>")
         assert 'viewBox="0 0 400 400"' in svg
-        # Aura, core, eye, orbiters all present in the rest state
-        for needle in ("auraGrad", "coreGrad", "ellipse", "circle"):
-            assert needle in svg
+        # Aura + core gradient defs + circle elements (halo, orbiters,
+        # wisdom ring) + the v0.9.3 pixel-owl group with crispEdges
+        # rects marking the 8-bit sprite body.
+        for needle in ("auraGrad", "coreGrad", "circle",
+                       "mnemo-owl", 'shape-rendering="crispEdges"'):
+            assert needle in svg, f"missing {needle!r}"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar v0.9.3: 8-bit owl sprite is 16x16 and left-right symmetric")
+def _():
+    assert len(avatar_mod._OWL_SPRITE) == 16
+    for row in avatar_mod._OWL_SPRITE:
+        assert len(row) == 16, f"row {row!r} is {len(row)} chars, want 16"
+    # Strict L/R symmetry is load-bearing for the visual — if someone
+    # edits the sprite, fail loudly rather than render a deformed owl.
+    for r, row in enumerate(avatar_mod._OWL_SPRITE):
+        assert row == row[::-1], (
+            f"row {r} is not symmetric: {row!r}")
+
+
+@test("avatar v0.9.3: rest mood closes the owl's eyes (no pupil cells)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        state = avatar_mod.compute_state(projects_dir=pd)
+        state["mood_phase"] = "rest"
+        svg_rest = avatar_mod.render_svg(state)
+        state["mood_phase"] = "focus"
+        svg_focus = avatar_mod.render_svg(state)
+        # Rest state renders pupils as rim-colour slits, focus renders
+        # them as full accent pupils — the rendered SVG must differ.
+        assert svg_rest != svg_focus
+        # Both states still contain the owl group
+        assert "mnemo-owl" in svg_rest
+        assert "mnemo-owl" in svg_focus
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar v0.9.3: pixel-owl breathing + tuft-sway animations embedded")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        state = avatar_mod.compute_state(projects_dir=pd)
+        state["restlessness"] = 0.5  # force tuft sway
+        svg = avatar_mod.render_svg(state)
+        # Breathing animation on the owl group
+        assert 'animateTransform' in svg
+        # Tuft sway fires when restlessness > 0
+        assert 'type="rotate"' in svg
     finally:
         shutil.rmtree(pd)
 
@@ -4679,6 +4729,531 @@ def _():
 # =============================================================================
 #  v0.7: Brain L5 identity injection
 # =============================================================================
+
+@test("memory v0.7.1: search falls back to OR when AND returns no hits")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        store.write("My favorite color is teal", kind="preference")
+        # "favorite color"  AND would match.
+        # "favorite missing" AND misses; OR should still catch "favorite".
+        strict_hits = store.search("favorite color")
+        assert len(strict_hits) == 1, strict_hits
+        fallback_hits = store.search("favorite missingterm")
+        assert len(fallback_hits) == 1, fallback_hits
+        # Pathological all-miss query returns empty after fallback too.
+        empty = store.search("zzzzz yyyyy xxxxx")
+        assert empty == [], empty
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.7.1: _fts5_escape supports OR joining for recall mode")
+def _():
+    assert mm._fts5_escape("a b") == '"a" "b"'
+    assert mm._fts5_escape("a b", any_token=True) == '"a" OR "b"'
+    # Single-token queries return a single quoted term regardless of mode
+    assert mm._fts5_escape("a", any_token=True) == '"a"'
+
+
+# =============================================================================
+#  v0.8 / v0.9: mnemosyne_instinct (user-pattern distillation; v0.9 promoted to L0 tier)
+# =============================================================================
+
+@test("instinct: distill clusters recurring user-pattern signals into L0 (v0.9)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(f"user prefers terse direct responses no hedging {i}",
+                        kind="preference")
+        for i in range(3):
+            store.write(f"user uses dark mode editor terminal app {i}",
+                        kind="preference")
+        # Noise that should not become an instinct
+        store.write("failed to call api timeout", kind="failure_note")
+
+        r = instinct_mod.distill(store, lookback_days=30,
+                                  min_cluster_size=2, max_instincts=10)
+        assert r["written"] >= 2, r
+        rows = instinct_mod.list_instincts(store)
+        assert len(rows) == r["written"], rows
+        # v0.9: every distilled row lands in L0_INSTINCT
+        for row in rows:
+            assert row["tier"] == mm.L0_INSTINCT, (
+                f"expected L0_INSTINCT (0), got {row['tier']}")
+        # Failure-note kind is excluded from candidate kinds
+        contents = " ".join(row["content"] for row in rows)
+        assert "failed" not in contents.lower(), contents
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("instinct v0.9: legacy v0.8 L4 user_instinct rows still inject via Brain")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        store = mm.MemoryStore(path=pd / "m.db")
+        # Simulate a row written by v0.8 (tier=4 instead of v0.9 tier=0)
+        store._conn.execute(
+            "INSERT INTO memories(created_utc, updated_utc, source, "
+            "tier, kind, content, strength) "
+            "VALUES('2025-01-01T00:00:00.000000Z',"
+            "'2025-01-01T00:00:00.000000Z','instinct',?,"
+            "'user_instinct','[LEGACY] sample old-tier instinct', 0.8)",
+            (mm.L4_PATTERN,),
+        )
+        captured: dict[str, Any] = {}
+
+        def fake_chat(messages, **kw):
+            captured["messages"] = messages
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=False),
+                     chat_fn=fake_chat, memory=store)
+        b.turn("hi")
+        sys_msg = next(m for m in captured["messages"]
+                       if m["role"] == "system")
+        assert "Learned user instincts" in sys_msg["content"]
+        assert "[LEGACY]" in sys_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.9: L0_INSTINCT is a valid promote target + apply_decay demotes L0 → L4")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        # promote() accepts L0_INSTINCT
+        mid = store.write("seed", kind="user_instinct", tier=mm.L2_WARM)
+        store.promote(mid, to_tier=mm.L0_INSTINCT)
+        assert store.get(mid)["tier"] == mm.L0_INSTINCT
+        # Decay below 0.3 demotes L0 → L4 (not delete; substrate
+        # doesn't forget; distiller rebuilds L0 next pass)
+        store._conn.execute(
+            "UPDATE memories SET strength = 0.05, "
+            "created_utc='2020-01-01T00:00:00.000000Z', "
+            "last_accessed_utc='2020-01-01T00:00:00.000000Z'"
+        )
+        store.apply_decay()
+        assert store.get(mid)["tier"] == mm.L4_PATTERN
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.9: stats() exposes L0_instinct count separately")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        store.write("a", tier=mm.L0_INSTINCT, kind="user_instinct")
+        store.write("b", tier=mm.L4_PATTERN, kind="pattern")
+        s = store.stats()
+        assert s["by_tier"]["L0_instinct"] == 1, s
+        assert s["by_tier"]["L4_pattern"] == 1, s
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("instinct: distill is idempotent (deletes prior batch on re-run)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(f"user prefers verbose explanations and examples {i}",
+                        kind="preference")
+        r1 = instinct_mod.distill(store, lookback_days=30,
+                                   min_cluster_size=2, max_instincts=10)
+        r2 = instinct_mod.distill(store, lookback_days=30,
+                                   min_cluster_size=2, max_instincts=10)
+        assert r1["written"] >= 1
+        assert r2["deleted_prior"] == r1["written"], r2
+        # Total instinct count in DB equals second pass's written count
+        rows = instinct_mod.list_instincts(store)
+        assert len(rows) == r2["written"], rows
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("instinct: dry_run writes nothing")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(f"user prefers metric units convert please {i}",
+                        kind="preference")
+        r = instinct_mod.distill(store, lookback_days=30,
+                                  min_cluster_size=2, max_instincts=10,
+                                  dry_run=True)
+        assert r["written"] == 0, r
+        assert r["deleted_prior"] == 0, r
+        assert instinct_mod.list_instincts(store) == []
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("instinct: clear_instincts deletes all user_instinct rows")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(3):
+            store.write(f"user prefers serif fonts when reading code {i}",
+                        kind="preference")
+        instinct_mod.distill(store, lookback_days=30,
+                              min_cluster_size=2, max_instincts=10)
+        before = len(instinct_mod.list_instincts(store))
+        deleted = instinct_mod.clear_instincts(store)
+        assert deleted == before
+        assert instinct_mod.list_instincts(store) == []
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.8: user_instinct rows land in system prompt on every turn")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(f"user prefers terse responses no hedging {i}",
+                        kind="preference")
+        instinct_mod.distill(store, lookback_days=30,
+                              min_cluster_size=2, max_instincts=10)
+
+        captured: dict[str, Any] = {}
+
+        def fake_chat(messages, **kw):
+            captured["messages"] = messages
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=False),
+                     chat_fn=fake_chat, memory=store)
+        b.turn("hi")
+        sys_msg = next(m for m in captured["messages"]
+                       if m["role"] == "system")
+        assert "Learned user instincts" in sys_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  v0.8: mnemosyne_compactor audit
+# =============================================================================
+
+@test("compactor v0.8: audit_patterns reports hit-rate and dead-fraction")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        # Plant + age + promote two distinct patterns. The two clusters
+        # need vocabulary that's lexically distinct or the Jaccard
+        # threshold collapses them into one cluster.
+        for i in range(8):
+            store.write(
+                f"network timeout connecting upstream service {i}",
+                kind="event", tier=mm.L3_COLD)
+        for i in range(5):
+            store.write(
+                f"obsidian vault sync hiccup occurred during write {i}",
+                kind="event", tier=mm.L3_COLD)
+        store._conn.execute(
+            "UPDATE memories SET created_utc='2020-01-01T00:00:00.000000Z'"
+        )
+        compactor_mod.compact_patterns(store, min_age_days=1,
+                                        min_cluster_size=3)
+        # Make L4 rows aged so the dead-age threshold actually applies
+        store._conn.execute(
+            "UPDATE memories SET created_utc='2024-01-01T00:00:00.000000Z' "
+            "WHERE kind='pattern'"
+        )
+        ids = [r[0] for r in store._conn.execute(
+            "SELECT id FROM memories WHERE kind='pattern' ORDER BY id"
+        ).fetchall()]
+        # Mark one pattern as accessed; leave the other dead
+        store._conn.execute(
+            "UPDATE memories SET access_count=3 WHERE id=?", (ids[0],))
+
+        report = compactor_mod.audit_patterns(store, dead_age_days=30)
+        assert report["total_patterns"] == 2, report
+        assert report["hit_count"] == 1, report
+        assert report["hit_rate"] == 0.5, report
+        assert report["dead_count"] == 1, report
+        assert report["dead_fraction"] == 0.5, report
+        assert report["avg_age_days"] > 0, report
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  v0.8: batched UPDATEs (regression smoke — ensure semantics unchanged)
+# =============================================================================
+
+@test("memory v0.8: search() batched reinforce still updates every hit")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(5):
+            store.write(f"common topic about widgets and gizmos {i}",
+                        kind="fact")
+        baseline_strengths = [
+            float(r["strength"]) for r in store._conn.execute(
+                "SELECT strength FROM memories ORDER BY id"
+            ).fetchall()
+        ]
+        # All start at 1.0 by default — ensure that's the baseline.
+        for s in baseline_strengths:
+            assert s == 1.0, baseline_strengths
+        hits = store.search("widgets gizmos", limit=5)
+        assert len(hits) == 5, hits
+        # Each row should now have access_count >= 1 (batched UPDATE
+        # touched all matched rows, not just the first).
+        rows = store._conn.execute(
+            "SELECT access_count FROM memories ORDER BY id"
+        ).fetchall()
+        for r in rows:
+            assert r["access_count"] >= 1, dict(r)
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.8: apply_decay still demotes L4 patterns below 0.3")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        p = store.write("pattern row", kind="pattern", tier=mm.L4_PATTERN)
+        store._conn.execute(
+            "UPDATE memories SET strength = 0.05, "
+            "created_utc='2020-01-01T00:00:00.000000Z', "
+            "last_accessed_utc='2020-01-01T00:00:00.000000Z'"
+        )
+        store.apply_decay()
+        row = store.get(p)
+        assert row["tier"] == mm.L3_COLD, row
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  v0.9.2: tool-result budgeting
+# =============================================================================
+
+@test("budget_tool_result: small results pass through unchanged")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        from mnemosyne_skills import budget_tool_result
+        r, info = budget_tool_result(
+            "short string", skill_name="t",
+            max_result_size=8000, out_dir=pd,
+        )
+        assert r == "short string"
+        assert info is None
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("budget_tool_result: large string gets budgeted + persisted")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        from mnemosyne_skills import budget_tool_result
+        big = "y" * 15000
+        r, info = budget_tool_result(
+            big, skill_name="read_file",
+            max_result_size=4000, out_dir=pd,
+        )
+        assert info is not None
+        assert info["original_size"] == 15000
+        assert info["max_size"] == 4000
+        assert isinstance(r, str)
+        assert "[tool output budget: 15000 chars" in r
+        assert "[full output saved to:" in r
+        # Full content on disk
+        assert info["output_path"] is not None
+        assert Path(info["output_path"]).read_text() == big
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("budget_tool_result: large dict JSON-encoded, then budgeted")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        from mnemosyne_skills import budget_tool_result
+        huge = {"items": ["row" + str(i) for i in range(5000)]}
+        r, info = budget_tool_result(
+            huge, skill_name="query",
+            max_result_size=2000, out_dir=pd,
+        )
+        assert info is not None
+        assert info["original_size"] > 2000
+        assert isinstance(r, str)
+        assert info["output_path"] is not None
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.2: oversized tool result is budgeted in-context + persisted")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        big_payload = "z" * 20000
+
+        def giant_read(**_: Any) -> dict[str, Any]:
+            return {"content": big_payload}
+
+        reg = sk.SkillRegistry()
+        reg.register(sk.Skill(
+            name="giant_read", description="reads big",
+            invocation="python", callable=giant_read,
+        ))
+        mem = mm.MemoryStore(path=pd / "m.db")
+        captured: list[list[dict[str, Any]]] = []
+        turn_state = {"i": 0}
+
+        def fake_chat(messages, **kw):
+            captured.append([dict(m) for m in messages])
+            turn_state["i"] += 1
+            if turn_state["i"] == 1:
+                return {"text": "", "tool_calls": [
+                    {"id": "c1", "name": "giant_read", "arguments": {}},
+                ], "status": "ok", "usage": {}}
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(
+            config=br.BrainConfig(
+                enforce_identity_lock=False,
+                tool_result_max_chars=4000,
+            ),
+            chat_fn=fake_chat, memory=mem, skills=reg,
+        )
+        b.turn("read the big thing")
+
+        # 2nd chat call's message list contains the budgeted tool msg
+        last_msgs = captured[-1]
+        tool_msg = next((m for m in last_msgs
+                         if m.get("role") == "tool"), None)
+        assert tool_msg is not None
+        content = tool_msg["content"]
+        assert "[tool output budget:" in content
+        assert "[full output saved to:" in content
+        # Budgeted content is much smaller than the original
+        assert len(content) < 8000, len(content)
+
+        # The persisted file exists and round-trips the full payload
+        import re as _re
+        m = _re.search(r"saved to: (.+?)\]", content)
+        assert m, content
+        saved = Path(m.group(1))
+        assert saved.is_file(), saved
+        assert big_payload in saved.read_text()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.2: tool_result_max_chars=0 disables budgeting entirely")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        big_payload = "w" * 20000
+
+        def giant(**_: Any) -> dict[str, Any]:
+            return {"content": big_payload}
+
+        reg = sk.SkillRegistry()
+        reg.register(sk.Skill(
+            name="giant", description="",
+            invocation="python", callable=giant,
+        ))
+        mem = mm.MemoryStore(path=pd / "m.db")
+        captured: list[list[dict[str, Any]]] = []
+        turn_state = {"i": 0}
+
+        def fake_chat(messages, **kw):
+            captured.append([dict(m) for m in messages])
+            turn_state["i"] += 1
+            if turn_state["i"] == 1:
+                return {"text": "", "tool_calls": [
+                    {"id": "c1", "name": "giant", "arguments": {}},
+                ], "status": "ok", "usage": {}}
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(
+            config=br.BrainConfig(
+                enforce_identity_lock=False,
+                tool_result_max_chars=0,
+            ),
+            chat_fn=fake_chat, memory=mem, skills=reg,
+        )
+        b.turn("hi")
+        tool_msg = next(m for m in captured[-1]
+                        if m.get("role") == "tool")
+        # Full payload flows through untouched
+        assert big_payload in tool_msg["content"]
+        assert "[tool output budget:" not in tool_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.2: per-skill max_result_size overrides BrainConfig default")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+
+        def mid(**_: Any) -> str:
+            return "q" * 3000  # 3000 chars
+
+        reg = sk.SkillRegistry()
+        reg.register(sk.Skill(
+            name="mid", description="",
+            invocation="python", callable=mid,
+            max_result_size=1000,   # per-skill, tighter than Brain default
+        ))
+        mem = mm.MemoryStore(path=pd / "m.db")
+        captured: list[list[dict[str, Any]]] = []
+        turn_state = {"i": 0}
+
+        def fake_chat(messages, **kw):
+            captured.append([dict(m) for m in messages])
+            turn_state["i"] += 1
+            if turn_state["i"] == 1:
+                return {"text": "", "tool_calls": [
+                    {"id": "c1", "name": "mid", "arguments": {}},
+                ], "status": "ok", "usage": {}}
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        # Brain default is 8000, but the skill's 1000 wins
+        b = br.Brain(
+            config=br.BrainConfig(enforce_identity_lock=False),
+            chat_fn=fake_chat, memory=mem, skills=reg,
+        )
+        b.turn("hi")
+        tool_msg = next(m for m in captured[-1]
+                        if m.get("role") == "tool")
+        # 3000-char result exceeds skill's 1000-char limit — budgeted
+        assert "[tool output budget:" in tool_msg["content"]
+        assert "> 1000 max" in tool_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
 
 @test("brain v0.7: L5 identity rows land in system prompt on every turn")
 def _():

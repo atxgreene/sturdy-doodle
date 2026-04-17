@@ -193,8 +193,8 @@ pip install -r "$PROJECTS_DIR/eternal-context/skills/eternal-context/requirement
 log "Installing fantastic-disco (consciousness extensions) in editable mode"
 pip install -e "$PROJECTS_DIR/fantastic-disco[dev]"
 
-# ---- Step 6b: install this harness repo (sturdy-doodle) ----------------------
-# If this script is running FROM a clone of sturdy-doodle (the canonical case),
+# ---- Step 6b: install this harness repo (Mnemosyne) ----------------------
+# If this script is running FROM a clone of Mnemosyne (the canonical case),
 # install it into the same venv so that the harness CLI commands
 # (mnemosyne-experiments, mnemosyne-pipeline, environment-snapshot, obsidian-search,
 #  notion-search, harness-telemetry) are available on $PATH and the library

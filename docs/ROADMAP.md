@@ -151,8 +151,8 @@ Every "shipped and verifiable" row has a corresponding test. To verify
 locally:
 
 ```sh
-git clone https://github.com/atxgreene/sturdy-doodle.git
-cd sturdy-doodle
+git clone https://github.com/atxgreene/Mnemosyne.git
+cd Mnemosyne
 pip install -e .
 python3 tests/test_all.py          # 122 unit tests, <2s on laptops
 ./demo.sh                           # end-to-end narrative demo

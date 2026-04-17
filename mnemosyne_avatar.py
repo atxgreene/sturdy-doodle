@@ -579,10 +579,271 @@ def write_snapshot(state: dict[str, Any], projects_dir: Path | None = None) -> P
     return target
 
 
+# ---- 8-bit pixel owl (v0.9.3) -----------------------------------------------
+#
+# A recognizable Mnemosyne mascot rendered entirely from SVG rects —
+# every cell is one "pixel" in the classic 8-bit sprite sense.
+#
+# Grid is 16 wide × 16 tall. Each character in _OWL_SPRITE marks the
+# material drawn in that cell:
+#     '.'  transparent (background shows through)
+#     'F'  primary feather       -> palette.core
+#     'D'  dark feather outline  -> palette.rim
+#     'T'  ear tuft (slightly darker than F)
+#     'B'  belly / chest lighter -> blend of core + bg
+#     'E'  eye white / iris      -> palette.bg or light-tint
+#     'P'  pupil                 -> palette.accent
+#     'K'  beak                  -> palette.rim
+#     'C'  chest core glow (L0 instinct gut-feel indicator)
+#
+# The design is deliberately mirror-symmetric left/right so rendering
+# is cheap and the animation hooks (blink, breathe, tuft sway) stay
+# simple to reason about.
+
+_OWL_SPRITE = [
+    #0123456789012345
+    "..TT........TT..",  # 0  ear tufts — paired, left/right symmetric
+    ".TTT........TTT.",  # 1  tuft broadens
+    ".TFF........FFT.",  # 2  tufts fade into head feathers
+    "..DFFFFFFFFFFD..",  # 3  head top outline
+    ".DFFFFFFFFFFFFD.",  # 4
+    ".FFEEEFFFFEEEFF.",  # 5  eye iris — upper
+    ".FEPPEFFFFEPPEF.",  # 6  pupils, row 1
+    ".FEPPEFFFFEPPEF.",  # 7  pupils, row 2
+    ".FFEEEFFFFEEEFF.",  # 8  eye iris — lower
+    "..FFFFFKKFFFFF..",  # 9  head base + beak (beak centered below eyes)
+    "..FFFFKKKKFFFF..",  # 10 beak widens
+    ".FFBBBCCCCBBBFF.",  # 11 chest + L0 instinct glow (C cells)
+    ".FFBBBBCCBBBBFF.",  # 12 chest continues, glow tapers
+    ".FFBBBBBBBBBBFF.",  # 13 full belly
+    "..FFBBBBBBBBFF..",  # 14 belly taper
+    "...DDFFFFFFDD...",  # 15 feet (dark base)
+]
+
+# Sanity-check the sprite is 16×16 before use (fails at import time
+# with a clear error if someone edits it wrong).
+for _i, _row in enumerate(_OWL_SPRITE):
+    if len(_row) != 16:
+        raise AssertionError(
+            f"_OWL_SPRITE row {_i} is {len(_row)} chars, expected 16: {_row!r}"
+        )
+if len(_OWL_SPRITE) != 16:
+    raise AssertionError(
+        f"_OWL_SPRITE must be 16 rows, got {len(_OWL_SPRITE)}"
+    )
+
+
+def _render_pixel_owl(
+    *,
+    cx: float,
+    cy: float,
+    core_r: float,
+    palette: dict[str, str],
+    mood: str,
+    health: float,
+    pulse_s: float,
+    calibration: float | None,
+    restlessness: float | None,
+) -> list[str]:
+    """Render a 16×16 pixel owl as a list of SVG <rect> fragments.
+
+    Trait encoding:
+        mood_phase → eye state (full pupils / narrow slits / closed)
+        health     → feather saturation (low health = partial fade)
+        pulse_s    → breathing animation period (whole owl gently
+                     translates on an <animateTransform>)
+        calibration → pupil micro-drift amplitude (well-calibrated
+                     agents have steadier eyes)
+        restlessness → ear-tuft twitch frequency
+    """
+    # Sprite cell size chosen so the owl fills ~2× core_r. With a
+    # 16-cell sprite, cell = (2 * core_r) / 16.
+    cell = max(3.0, (2.0 * core_r) / 16.0)
+    # Top-left of the sprite grid
+    x0 = cx - cell * 8.0
+    y0 = cy - cell * 8.0
+
+    feather  = palette["core"]
+    rim      = palette["rim"]
+    accent   = palette["accent"]
+    bg       = palette["bg"]
+
+    # Feather saturation dims when health is low; below 0.3 the owl
+    # visibly fades.
+    feather_opacity = 0.65 + 0.35 * max(0.0, min(1.0, health))
+    dark_opacity    = 0.55 + 0.40 * max(0.0, min(1.0, health))
+
+    # Mood → eye rendering. Three states:
+    #   focus: full round pupils (alert)
+    #   active: normal pupils (curious)
+    #   rest: narrow slits (half-closed)
+    if mood == "rest":
+        pupil_style = "rest"
+    elif mood == "focus":
+        pupil_style = "focus"
+    else:
+        pupil_style = "active"
+
+    # Calibration drives a tiny SMIL pupil-drift animation. Low
+    # calibration → more drift (eyes dart); well-calibrated → steady.
+    drift_px = (
+        0.0 if calibration is None
+        else max(0.0, min(cell * 0.25, (1.0 - calibration) * cell * 0.25))
+    )
+
+    # Restlessness → tuft sway amplitude (0..1 → 0..4 deg rotation).
+    # None = "no signal yet" (fresh install with no turns), render static.
+    _restless = 0.0 if restlessness is None else float(restlessness)
+    tuft_sway_deg = max(0.0, min(4.0, _restless * 4.0))
+
+    parts: list[str] = []
+    # Group owl so we can breathe-animate the whole thing
+    parts.append('<g id="mnemo-owl">')
+
+    # Helper: emit a rect for a single grid cell
+    def rect(r: int, c: int, fill: str, opacity: float = 1.0) -> str:
+        # +0.2 / -0.4 inset erases hairline seams between rects on
+        # browsers that don't align subpixel edges perfectly.
+        return (
+            f'<rect x="{x0 + c * cell - 0.2:.2f}" '
+            f'y="{y0 + r * cell - 0.2:.2f}" '
+            f'width="{cell + 0.4:.2f}" '
+            f'height="{cell + 0.4:.2f}" '
+            f'fill="{fill}" fill-opacity="{opacity:.2f}" '
+            f'shape-rendering="crispEdges"/>'
+        )
+
+    # Pixel-blend belly colour from core + bg (70/30)
+    def _mix(a: str, b: str, t: float) -> str:
+        try:
+            ar, ag, ab = int(a[1:3], 16), int(a[3:5], 16), int(a[5:7], 16)
+            br, bg_, bb = int(b[1:3], 16), int(b[3:5], 16), int(b[5:7], 16)
+            rr = int(ar * (1 - t) + br * t)
+            rg = int(ag * (1 - t) + bg_ * t)
+            rb = int(ab * (1 - t) + bb * t)
+            return f'#{rr:02x}{rg:02x}{rb:02x}'
+        except (ValueError, IndexError):
+            return a  # if palette isn't #rrggbb form, fall back
+
+    belly_colour = _mix(feather, bg, 0.55) if feather.startswith('#') else feather
+    chest_glow = accent  # L0 instinct "gut" marker
+
+    # Pass 1: render non-eye, non-pupil cells
+    for r, row in enumerate(_OWL_SPRITE):
+        for c, ch in enumerate(row):
+            if ch == '.':
+                continue
+            if ch in ('E', 'P'):
+                continue  # handled by eye pass
+            if ch == 'F':
+                parts.append(rect(r, c, feather, feather_opacity))
+            elif ch == 'D':
+                parts.append(rect(r, c, rim, dark_opacity))
+            elif ch == 'T':
+                # Ear tufts get a subtle sway via group transform later
+                continue  # handled by tuft pass
+            elif ch == 'B':
+                parts.append(rect(r, c, belly_colour, feather_opacity))
+            elif ch == 'K':
+                parts.append(rect(r, c, rim, 0.95))
+            elif ch == 'C':
+                # Chest-centre L0 glow — a little brighter than belly
+                parts.append(rect(r, c, chest_glow, 0.55))
+
+    # Eye pass — special-cased to support mood states. The four E
+    # cells per eye form a 2×2 block; pupils are the two P cells.
+    # In rest mood we draw a slit (single row of darker fill across
+    # the middle of the eye block) instead of open pupils.
+    for r, row in enumerate(_OWL_SPRITE):
+        for c, ch in enumerate(row):
+            if ch == 'E':
+                if pupil_style == "rest":
+                    # Fill eye cells with feather colour so they "close"
+                    parts.append(rect(r, c, feather, feather_opacity))
+                else:
+                    # Eye-white — lighter tint, readable on dark bg
+                    eye_bg = _mix(bg, feather, 0.2) if bg.startswith('#') else bg
+                    parts.append(rect(r, c, eye_bg, 0.95))
+            elif ch == 'P':
+                if pupil_style == "rest":
+                    parts.append(rect(r, c, rim, dark_opacity))  # slit
+                elif pupil_style == "focus":
+                    # Full solid accent pupil
+                    parts.append(rect(r, c, accent, 1.0))
+                else:
+                    # Normal active: pupil with slight warmer tint
+                    parts.append(rect(r, c, accent, 0.92))
+
+    # Tuft pass — with SMIL rotation around each tuft group's
+    # centre. Restlessness drives the sway amplitude.
+    if tuft_sway_deg > 0.01:
+        for side, (cols, angle_sign) in [("left",  ([0, 1, 2], +1)),
+                                           ("right", ([13, 14, 15], -1))]:
+            # Determine bounding box of this side's T cells
+            t_cells = [(r, c) for r, row in enumerate(_OWL_SPRITE)
+                        for c, ch in enumerate(row)
+                        if ch == 'T' and c in cols]
+            if not t_cells:
+                continue
+            parts.append('<g>')
+            # Pivot at the bottom of the tuft column (blend into head)
+            pivot_c = sum(c for _, c in t_cells) / len(t_cells)
+            pivot_r = max(r for r, _ in t_cells) + 1
+            pivot_x = x0 + pivot_c * cell + cell / 2
+            pivot_y = y0 + pivot_r * cell
+            for r, c in t_cells:
+                parts.append(rect(r, c, rim, dark_opacity * 0.9))
+            parts.append(
+                f'<animateTransform attributeName="transform" '
+                f'type="rotate" '
+                f'values="0 {pivot_x:.2f} {pivot_y:.2f};'
+                f'{angle_sign * tuft_sway_deg:.1f} {pivot_x:.2f} {pivot_y:.2f};'
+                f'0 {pivot_x:.2f} {pivot_y:.2f}" '
+                f'dur="{max(1.2, 3.0 - _restless * 2.0):.2f}s" '
+                f'repeatCount="indefinite"/>'
+            )
+            parts.append('</g>')
+    else:
+        # No sway — render tufts statically
+        for r, row in enumerate(_OWL_SPRITE):
+            for c, ch in enumerate(row):
+                if ch == 'T':
+                    parts.append(rect(r, c, rim, dark_opacity * 0.9))
+
+    # Pupil drift: small side-to-side motion on the pupil rects when
+    # calibration is low. Encoded as a transparent overlay that shifts
+    # just enough to look like gaze wander without looking glitchy.
+    if drift_px > 0.1:
+        parts.append(
+            f'<animateTransform xlink:href="#mnemo-owl" '
+            f'attributeName="transform" '
+            f'type="translate" additive="sum" '
+            f'values="0 0; {drift_px:.2f} 0; 0 0; -{drift_px:.2f} 0; 0 0" '
+            f'dur="3.5s" repeatCount="indefinite"/>'
+        )
+
+    # Breathing animation — whole owl group gently translates up/down
+    # in sync with the aura pulse.
+    parts.append(
+        f'<animateTransform attributeName="transform" '
+        f'type="translate" additive="sum" '
+        f'values="0 0; 0 -{cell * 0.12:.2f}; 0 0" '
+        f'dur="{pulse_s:.2f}s" repeatCount="indefinite"/>'
+    )
+
+    parts.append('</g>')
+    return parts
+
+
 def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
     """Server-side SVG render — mirrors the JS renderer in
     `mnemosyne_ui/static/avatar.js`. Useful for docs screenshots and
     `mnemosyne-avatar render-svg` without spinning up a browser.
+
+    As of v0.9.3, the centre of the avatar is an 8-bit pixel owl
+    (see ``_render_pixel_owl``). Everything else — aura, habitat
+    memory-tier bands, wisdom ring, self-assessment rays, orbiters,
+    scars, memory roots — is unchanged.
 
     Output is a self-contained <svg>…</svg> string with embedded
     SMIL animation (renders animated in any modern browser; static in
@@ -605,7 +866,9 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
     skills_count = int(state.get("skills_count", 0))
     slip_count = int(state.get("identity_slip_count", 0))
     mood = state.get("mood_phase", "rest")
-    eye_open = 16 if mood == "focus" else (4 if mood == "rest" else 10)
+    # v0.9.3: eye-open sizing moved into _render_pixel_owl (per-cell
+    # sprite mood states). The old `eye_open` height was unused after
+    # the pixel-owl replacement.
 
     parts: list[str] = []
     parts.append(f'<svg xmlns="http://www.w3.org/2000/svg" '
@@ -691,18 +954,26 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
                       f'stroke-opacity="{0.18 + 0.06 * (rings - i):.2f}" '
                       f'stroke-width="1.2"/>')
 
-    # Core orb
+    # Core orb halo (behind the pixel owl; subtle)
     core_r = 56 + health * 12
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{core_r:.1f}" '
-                  f'fill="url(#coreGrad)" stroke="{rim}" '
-                  f'stroke-opacity="0.55" stroke-width="1.5"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy + 2}" r="{core_r * 0.9:.1f}" '
+                  f'fill="url(#coreGrad)" fill-opacity="0.45" '
+                  f'stroke="{rim}" stroke-opacity="0.35" '
+                  f'stroke-width="1.2"/>')
 
-    # Eye
-    parts.append(f'<ellipse cx="{cx}" cy="{cy - 4}" rx="18" '
-                  f'ry="{eye_open}" fill="{bg}" stroke="{rim}" '
-                  f'stroke-width="1"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy - 4}" r="5" '
-                  f'fill="{accent}" opacity="0.95"/>')
+    # v0.9.3 — 8-bit pixel owl. Replaces the abstract orb/eye with a
+    # recognizable Mnemosyne mascot while still encoding every trait
+    # the old renderer did (mood → eye state, health → feather density,
+    # calibration → pupil steadiness, breathing pulse → SMIL animation).
+    parts.extend(_render_pixel_owl(
+        cx=cx, cy=cy, core_r=core_r,
+        palette=palette,
+        mood=mood,
+        health=health,
+        pulse_s=pulse_s,
+        calibration=state.get("calibration"),
+        restlessness=state.get("restlessness", 0.0),
+    ))
 
     # Orbiters
     orbiter_count = max(0, min(12, skills_count))

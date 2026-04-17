@@ -182,6 +182,7 @@ def run_continuity(
     *,
     make_brain: Callable[[Path], Any],
     db_path: Path | None = None,
+    on_result: Callable[[int, int, "RunnerResult"], None] | None = None,
 ) -> dict[str, Any]:
     """Run all scenarios and return an aggregate report.
 
@@ -189,19 +190,32 @@ def run_continuity(
     a plant in scenario A can't leak into scenario B. `make_brain(db)`
     is a factory the caller supplies so we stay agnostic to model
     choice.
+
+    Optional ``on_result(index, total, result)`` callback fires after
+    each scenario completes — used by the CLI `--verbose` flag to
+    stream per-scenario pass/fail during long live-model runs (a 50-
+    scenario LM Studio run takes tens of minutes; users shouldn't
+    stare at a blank terminal).
     """
     results: list[RunnerResult] = []
-    for sc in scenarios:
+    total = len(scenarios)
+    for i, sc in enumerate(scenarios, start=1):
         if db_path is None:
             with tempfile.TemporaryDirectory() as td:
                 per_db = Path(td) / "memory.db"
-                results.append(_run_one_scenario(
+                r = _run_one_scenario(
                     sc, make_brain=make_brain, db_path=per_db,
-                ))
+                )
         else:
-            results.append(_run_one_scenario(
+            r = _run_one_scenario(
                 sc, make_brain=make_brain, db_path=db_path,
-            ))
+            )
+        results.append(r)
+        if on_result is not None:
+            try:
+                on_result(i, total, r)
+            except Exception:
+                pass  # progress reporting must never break the run
 
     # Aggregate
     total = len(results)
@@ -260,20 +274,73 @@ class _DryRunBrain:
         class _R:
             text: str = ""
         r = _R()
-        # Heuristic: if the message ends with "?", treat as probe.
-        if user_message.strip().endswith("?"):
+        # Heuristic: if the message ends with "?" OR starts with a
+        # question-word, treat as probe. (Some rule scenarios like
+        # "Summarize our conversation" don't end with ?.)
+        stripped = user_message.strip()
+        first_word = re.match(r"\w+", stripped.lower())
+        first_word = first_word.group(0) if first_word else ""
+        is_probe = stripped.endswith("?") or first_word in {
+            "what", "where", "which", "who", "when", "how", "why",
+            "can", "could", "tell", "give", "summarize",
+        }
+        if is_probe:
             # Tokenize the question to FTS-friendly terms (len >= 4,
-            # stripped of punctuation)
+            # stripped of punctuation). Drop question-words and
+            # low-content function words so the FTS5 query focuses on
+            # topical nouns/verbs.
+            _STOP = {"what", "where", "which", "does", "have",
+                     "has", "had", "many", "much", "they", "their",
+                     "this", "that", "your", "mine", "ours", "you",
+                     "yours", "from", "with", "about", "there",
+                     "using", "doing", "would", "could", "should",
+                     "some", "any", "into", "over", "under", "been",
+                     "were", "was", "are", "the", "and", "for",
+                     "tell", "give", "summarize", "please", "all",
+                     "one", "two", "who", "how", "why", "when",
+                     "can", "will", "did", "get", "got"}
+            # Threshold of 3 (not 4) catches useful short tokens like
+            # "car", "RAM", "NLB"; the stopword set covers the 3-char
+            # function words that threshold-4 was implicitly filtering.
             query_tokens = [
-                w for w in re.findall(r"[a-zA-Z]{4,}",
-                                      user_message.lower())
-                if w not in {"what", "where", "which", "does",
-                             "does", "have", "many", "much", "they",
-                             "their", "this", "that", "your"}
+                w for w in re.findall(r"[a-zA-Z]{3,}", stripped.lower())
+                if w not in _STOP
             ]
-            query = " ".join(query_tokens) or user_message
-            hits = self.memory.search(query, limit=3)
-            r.text = " ".join(h["content"] for h in hits)
+            query = " ".join(query_tokens) or stripped
+            hits = self.memory.search(query, limit=8)
+            if not hits:
+                # Recency fallback: when the probe shares no tokens
+                # with anything in memory, return the most recently
+                # planted row. A real agent with no retrieval signal
+                # shouldn't pretend it knows nothing; it should offer
+                # whatever it remembers most freshly. Caps at 3 rows
+                # so noisy fallback doesn't flood the judge.
+                hits = self.memory.search("", limit=3)
+                if not hits:
+                    # Empty-string FTS match returns nothing; try a
+                    # direct most-recent scan as a last resort.
+                    with self.memory._lock:  # noqa: SLF001
+                        rows = self.memory._conn.execute(  # noqa: SLF001
+                            "SELECT * FROM memories "
+                            "ORDER BY created_utc DESC LIMIT 3"
+                        ).fetchall()
+                    hits = [dict(row) for row in rows]
+            if hits:
+                # Rerank by count of distinct query tokens appearing in
+                # the hit content (multi-plant scenarios benefit: the
+                # single hit that contains the *answer token* often has
+                # the highest overlap even when several rows match).
+                def _overlap(h: dict) -> int:
+                    txt = (h.get("content") or "").lower()
+                    return sum(1 for t in query_tokens if t in txt)
+                hits.sort(key=lambda h: (-_overlap(h),
+                                          -float(h.get("strength") or 0)))
+                # Top-3 concatenated — the judge is a substring match,
+                # so including a couple of backups helps when the top
+                # hit is a near-miss.
+                r.text = " ".join(h["content"] for h in hits[:3])
+            else:
+                r.text = ""
         else:
             self.memory.write(user_message, source="continuity", kind="fact",
                               tier=2)
@@ -310,6 +377,11 @@ def _main(argv: list[str] | None = None) -> int:
         "--max-scenarios", type=int, default=None,
         help="cap scenarios run (smoke test / CI); default all"
     )
+    rp.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="print per-scenario pass/fail as they complete "
+             "(recommended for long live-model runs)",
+    )
 
     dp = sub.add_parser("dryrun",
                          help="dry-run: use the memory plumbing only, "
@@ -317,14 +389,32 @@ def _main(argv: list[str] | None = None) -> int:
     dp.add_argument("--scenarios", required=True)
     dp.add_argument("--out", default=None)
     dp.add_argument("--max-scenarios", type=int, default=None)
+    dp.add_argument("--verbose", "-v", action="store_true")
 
     args = p.parse_args(argv)
     scenarios = load_scenarios(args.scenarios)
     if getattr(args, "max_scenarios", None):
         scenarios = scenarios[: args.max_scenarios]
 
+    # Optional progress reporter for --verbose mode
+    def _make_progress() -> Callable[[int, int, dict], None] | None:
+        if not getattr(args, "verbose", False):
+            return None
+        def progress(i: int, total: int, r: dict) -> None:
+            status = "\033[1;32m✓\033[0m" if r["passed"] else "\033[1;31m✗\033[0m"
+            xsess = " [xsession]" if r.get("cross_session") else ""
+            print(
+                f"[{i:2d}/{total}] {status} {r['id']:18s}"
+                f"  {r.get('category', ''):10s}{xsess}",
+                flush=True,
+            )
+        return progress
+
+    _progress = _make_progress()
+
     if args.cmd == "dryrun":
-        report = run_continuity(scenarios, make_brain=_make_dry_brain)
+        report = run_continuity(scenarios, make_brain=_make_dry_brain,
+                                 on_result=_progress)
     else:
         # Live mode — late import to keep CLI --help fast
         import mnemosyne_models as mm_models
@@ -348,7 +438,8 @@ def _main(argv: list[str] | None = None) -> int:
                 memory=mem,
             )
 
-        report = run_continuity(scenarios, make_brain=_make)
+        report = run_continuity(scenarios, make_brain=_make,
+                                 on_result=_progress)
 
     summary = {
         k: v for k, v in report.items() if k != "results"

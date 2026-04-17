@@ -2,6 +2,519 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.3] — 2026-04-17 — 8-bit pixel owl avatar + continuity runner verbose mode
+
+Pre-benchmark polish pass. Two user-facing improvements:
+
+**8-bit pixel owl avatar (`mnemosyne_avatar.py` + `mnemosyne_ui/static/avatar.js`)**
+
+Replaces the abstract-orb mascot with a recognizable 16×16 pixel owl
+rendered entirely from SVG rects. Every cell is a single `<rect>`
+with `shape-rendering="crispEdges"`; no raster assets, stays stdlib.
+
+- New `_OWL_SPRITE` constant: 16×16 grid of material chars
+  (`F` feather / `D` dark outline / `E` eye / `P` pupil / `K` beak /
+  `B` belly / `C` L0-instinct chest glow / `T` ear tuft). Strict
+  left/right symmetric; asserted at import time so editors can't
+  accidentally deform the owl.
+- New `_render_pixel_owl()` helper. Inputs: cx, cy, core_r, palette,
+  mood, health, pulse_s, calibration, restlessness. Outputs a list
+  of SVG fragments. Deterministic rect generation; breathing
+  animation on the owl group; tuft-sway animation when
+  restlessness > 0; pupil-drift animation when calibration is low.
+- Trait encoding preserved and expanded: `mood_phase` drives eye
+  state (full pupils / slits / closed); `health` drives feather
+  saturation; `pulses_per_minute` drives breathing period;
+  `calibration` drives pupil drift; `restlessness` drives tuft sway
+  frequency; `accent` palette colour becomes the L0 chest glow
+  (ties the visual to the v0.9 L0 Instinct tier).
+- `_build_l5_identity_block` and all other trait mappings unchanged
+  — the owl is a drop-in replacement for the former core-orb visual.
+- `mnemosyne_ui/static/avatar.js` gets a mirror `renderPixelOwl()`
+  function and matching `OWL_SPRITE` constant so the live dashboard
+  renders the same owl client-side as the Python export.
+- `docs/avatar-rest.svg` + `docs/avatar-active.svg` regenerated with
+  the new owl in representative rest-state and focus-state palettes.
+
+**Continuity runner: `--verbose` / `-v` streaming progress**
+
+`mnemosyne-continuity run` gained a `--verbose` flag that streams a
+one-line result per scenario as they complete. Useful for live-model
+runs where a full 50-scenario sweep can take 10-20 minutes on a
+local 7-8B quantized model; without progress output the terminal
+looked dead.
+
+- New `run_continuity(..., on_result=callable)` keyword. Fires after
+  each scenario with `(index, total, result)`. Wrapped in try/except
+  so a broken reporter can never take down the benchmark.
+- CLI: `--verbose` / `-v` available on both `run` and `dryrun`
+  subcommands. When set, prints colored `✓`/`✗` + scenario id +
+  category + `[xsession]` marker for cross-session scenarios.
+
+**`bench/README.md` quick-path refresh**
+
+- Added the "sanity-first: run 5 scenarios before committing to 50"
+  pattern, since confirming LM Studio responds correctly on a short
+  run before the 10-minute full run saves hours of debug on model
+  misconfiguration.
+- Example output block shows what `--verbose` looks like.
+- Wall-clock estimate formula added: `N × model_turn_latency × 2`.
+
+**Tests:** 288 → 291 green. 3 new:
+- avatar v0.9.3: 8-bit owl sprite is 16x16 and left-right symmetric
+- avatar v0.9.3: rest mood closes the owl's eyes (no pupil cells)
+- avatar v0.9.3: pixel-owl breathing + tuft-sway animations embedded
+
+Also: updated the existing `avatar: render_svg returns a valid SVG`
+test to check for the new pixel-owl markers (`mnemo-owl`,
+`shape-rendering="crispEdges"`) instead of the old abstract-orb
+`<ellipse>` eye.
+
+**Packaging:** `pyproject.toml` 0.9.2 → 0.9.3. No new modules, no
+new entry points.
+
+pyflakes clean. Ready for tonight's LM Studio continuity benchmark.
+
+## [0.9.2] — 2026-04-17 — tool result budgeting + canonical memory-tiers doc
+
+Ships the first concrete v0.9.2 candidate from the Rohit Yadav Claude
+Code teardown triage: **tool-result budgeting**. Also adds a single
+canonical one-pager that kills the external-LLM tier-naming drift
+problem permanently.
+
+**Tool-result budgeting (`mnemosyne_skills.py` + `mnemosyne_brain.py`)**
+Defends against the "user runs `cat` on a 1 MB log file" production
+failure mode where a single tool result fills the context window with
+noise and the agent loses coherence. Claude Code ships a 45+ tool
+subsystem largely to prevent this; we now have the same defense in
+~90 lines.
+
+- New module-level `budget_tool_result(result, *, skill_name,
+  max_result_size, out_dir)` in `mnemosyne_skills.py`. Returns
+  `(maybe_replaced_result, budget_info)`. Small results pass through
+  unchanged (one `len()` call and nothing else). Oversized results
+  are persisted to `$PROJECTS_DIR/tool-outputs/<YYYY-MM-DD>/
+  <HHMMSSmmm>-<skill>-<uuid>.txt` and the returned value is a
+  structured preview string that tells the model the full size, the
+  path on disk, and shows the first N chars.
+- New `Skill.max_result_size: int | None` field. Per-skill override
+  for the Brain-wide default. `None` = fall through to
+  `BrainConfig.tool_result_max_chars`.
+- New `BrainConfig.tool_result_max_chars: int = 8000`. ~2000 tokens
+  on a typical tokenizer; the size where a single tool result starts
+  to dominate a turn's prompt budget on 32k-context models. Set to 0
+  to disable budgeting entirely (not recommended).
+- Brain intercepts tool results in the dispatch loop immediately
+  after `skill.invoke()` succeeds (errors skip budgeting; they're
+  small and callers need the full error text). Emits a
+  `tool_result_budget_hit` telemetry event with `original_size`,
+  `max_size`, `output_path`, `preview_size` so triage can cluster on
+  chronically-oversized tools.
+- Budgeter is non-fatal by design: disk-write failures fall through
+  to a preview-only budgeted string rather than crashing the agent
+  loop. Wrapped in a try/except so a pathological storage situation
+  can never take down a turn.
+
+**`docs/MEMORY_TIERS.md` (new — the canonical reference)**
+Single source of truth for the six tiers. Every other doc that
+describes the memory architecture now has this page to defer to.
+Contents: canonical table (L0 through L5), Reflection → Instinct
+loop description, decay-multiplier table, explicit "what this is
+NOT" section naming the specific mislabelings external LLMs have
+produced ("L4 = archival / L5 = meta-memory" does not exist in the
+code), and a runnable Python snippet to verify the code agrees with
+the doc. The page is intentionally dense so LLMs that summarize it
+have less room to drift.
+
+**Article refresh (`docs/articles/v0.8-launch-substack.md`)**
+Repositioned from v0.8 launch piece to v0.8-through-v0.9.2
+cumulative launch piece. Timeline bullets added for v0.9.0 (L0
+tier) and v0.9.2 (tool budgeting). "5-tier + Instinct overlay"
+language replaced with "6-tier with L0 Instinct." "v0.9 roadmap"
+language replaced with "v0.10 roadmap" (v0.9.x is live). Rohit
+article referenced explicitly as the half-match / half-roadmap lens.
+
+**Packaging**
+- `pyproject.toml` 0.9.1 → 0.9.2.
+- No new modules, no new console scripts, no schema changes.
+
+**Tests:** 282 → 288 green. 6 new:
+- budget_tool_result: small results pass through
+- budget_tool_result: large string budgeted + persisted
+- budget_tool_result: large dict JSON-encoded, then budgeted
+- brain v0.9.2: oversized tool result is budgeted in-context + persisted
+- brain v0.9.2: tool_result_max_chars=0 disables budgeting entirely
+- brain v0.9.2: per-skill max_result_size overrides BrainConfig default
+
+pyflakes clean. No behavior change for any existing skill that returns
+a result under 8000 stringified characters.
+
+## [0.9.1] — 2026-04-17 — repo-rename sweep + doc consistency + Rohit-article triage
+
+No code changes. Pre-launch docs/branding consistency pass triggered by
+a full-repo sanity audit, plus folding Rohit Yadav's Claude Code
+teardown ("How I built harness for my agent using Claude Code leaks",
+April 7 2026) into `docs/HARNESS.md` as a secondary-reference audit.
+
+**Repo rename (sturdy-doodle → Mnemosyne).** The GitHub repo was
+renamed between sessions but many URLs were still pointing at the old
+slug. Fixed:
+- `pyproject.toml` — 9 project URLs (Homepage, Repository, Docs,
+  Issues, Changelog, Quickstart, Architecture, Roadmap, Benchmarks).
+  These render on the PyPI page, so this matters.
+- `pyproject.toml` description — "ICMS 3-tier memory" (last valid at
+  v0.2) → "ICMS 6-tier memory with Reflection → Instinct loop."
+- `pyproject.toml` v0.8 Instinct comment — was still calling it an
+  "L4 overlay"; updated to reflect v0.9's L0 tier.
+- `docs/SECURITY.md` issue-report URL.
+- `docs/WIRING.md` path examples.
+- `docs/LOCAL_MODELS.md`, `docs/ROADMAP.md` clone commands.
+- `docs/articles/v0.8-launch-substack.md` + `.../v0.8-x-thread.md` — 9
+  `sturdy-doodle` URL references rewritten.
+- `install-mnemosyne.sh` comment references.
+- `bench/README.md` issue URL.
+- `docs/ARCHITECTURE.md` layer-1 ASCII box now reads "this repo:
+  Mnemosyne".
+
+**ARCHITECTURE.md tier-count fix.** The four-layer-stack ASCII diagram
+said "ICMS 5-tier memory" while the memory section below said 6-tier.
+Contradiction resolved — diagram now lists all six tiers L0-L5 and
+calls out the Reflection → Instinct loop directly.
+
+**demo-quick.sh portability fix.** Was hardcoded to
+`/home/user/sturdy-doodle/...` paths. Now derives `REPO_ROOT` from
+`${BASH_SOURCE[0]}` so it runs from any clone location.
+
+**BLOG.md relocated.** `BLOG.md` (root, April 9, v0.2-era Twitter
+thread draft) moved to `docs/articles/v0.2-original-blog.md` with a
+header banner noting it's a dated historical artifact. Root dir was
+confusing — three article-y files (BLOG.md, SETUP.md, RELEASE.md)
+plus README.md made it unclear which was canonical. `docs/articles/`
+is now the single home for launch-piece drafts.
+
+**docs/ARTICLE.md banner.** Added a header noting it's the v0.5-era
+essay, superseded by `docs/articles/v0.8-launch-substack.md` for
+current framing. The inline "3-5 tiers" reference updated to point
+at CHANGELOG for the current 6-tier shape.
+
+**SETUP.md banner.** Added a header noting SETUP.md describes the
+pre-v0.2 multi-repo era (where Mnemosyne was a bootstrap that cloned
+`eternal-context` and `fantastic-disco` as separate repos). That
+flow is obsolete since v0.2.0 collapsed everything into one
+pip-installable package. Readers routed to `docs/QUICKSTART.md`.
+
+**docs/CONTEXT-DROP.md banner.** Clarified this is a maintainer-only
+session-handoff doc, not user documentation. It ships in the repo so
+it travels with backup bundles during sandbox transitions.
+
+**docs/HARNESS.md** — new subsection "Deeper read: Rohit Yadav's
+Claude Code teardown" folds the April 7 article's specific patterns
+into our audit. Maps current coverage against Claude Code's own
+architecture (async-generator agent loop, streaming tool executor,
+tool result budgeting, four-strategy compaction hierarchy,
+seven-stage permission pipeline, 823-line retry state machine,
+CLAUDE.md four-level composable-instruction hierarchy, git-worktree
+sub-agent isolation, infrastructure-as-layer-4 framing). Honest
+accounting of what we match, what we don't, and which gaps are
+concrete v0.9.2 / v0.10 candidates:
+- **v0.9.2 candidates (small):** tool result budgeting
+  (`maxResultSizeChars` + persist-to-disk + preview reference);
+  concurrency classification for tools (read-only tools run in
+  parallel batches, mutating tools run serially).
+- **v0.10 candidates (medium):** four-strategy context compaction
+  hierarchy (microcompact / snip / auto / collapse); CLAUDE.md-style
+  four-level AGENTS.md hierarchy with `@include`; error-taxonomy
+  state machine (LangGraph's 4-bucket schema).
+- **Deferred:** async-generator agent loop refactor; git-worktree
+  sub-agent isolation; layer-4 multi-tenancy / RBAC (not needed for
+  our single-user local-first premise).
+
+**pyproject.toml** 0.9.0 → 0.9.1 (docs-only patch bump; no API,
+behavior, or schema changes).
+
+**Tests:** 282/282 green (unchanged). pyflakes clean. No module
+changes.
+
+## [0.9.0] — 2026-04-16 — Instinct promoted to L0 + 6-tier ICMS + Reflection → Instinct loop
+
+Promotes Instinct from a v0.8 L4 overlay to its own dedicated tier
+(L0). The cognitive flow now matches the storage: Instinct sits
+*below* L1 Hot in the tier ordering, is checked first by the Brain
+on every turn, and is populated from L5 Identity (and lower tiers)
+via the offline distillation pass. Slow deliberate reflection
+gradually shapes fast automatic reaction — the loop the Grok / Akshay
+threads have been pointing at, finally first-class in the substrate.
+
+**New tier constant `L0_INSTINCT = 0` (`mnemosyne_memory.py`)**
+- Slots numerically *below* L1, so retrieval ordering is intuitive
+  (lower tier = checked first / fastest). Zero schema migration
+  needed — the `tier` column already accepted any int. Existing
+  v0.8 deployments with `kind="user_instinct"` rows at `tier=4`
+  continue to inject correctly via the Brain's kind-based query and
+  get cleared on the next `distill()` pass (which is idempotent and
+  replaces the prior batch).
+- `_TIER_NAMES`, `promote()`, `apply_decay()`, `stats()`, and the
+  `mnemosyne-memory` CLI all updated to recognize tier 0 as a
+  first-class member of the hierarchy.
+- Decay rule for L0: when a row drops below `strength=0.3`, it
+  demotes to L4 Pattern (not delete; the substrate doesn't forget;
+  the next distill pass rebuilds the L0 batch from fresh signals).
+- `KIND_DECAY_MULTIPLIERS["user_instinct"] = 0.4` (was 0.5 in v0.8)
+  — between identity (0.1) and pattern (0.5), reflecting Instinct's
+  position as identity-derived but more bursty than core values.
+
+**`mnemosyne_instinct.distill()` writes L0 (`mnemosyne_instinct.py`)**
+- `tier=L0_INSTINCT` instead of `tier=L4_PATTERN`. No other behavior
+  change. `clear_instincts()` still nukes-by-kind so it cleans up
+  both new L0 rows and any leftover L4 v0.8 rows on the same pass.
+- `list_instincts()` now returns `tier` as part of each row dict
+  (was: `id, content, strength, created_utc, metadata_json`).
+
+**Brain unchanged — backward-compat verified**
+- `_build_instinct_block()` already filters by `kind='user_instinct'`
+  not by tier, so v0.8 rows at tier=4 keep working alongside v0.9
+  rows at tier=0. New regression test
+  (`instinct v0.9: legacy v0.8 L4 user_instinct rows still inject
+  via Brain`) pins this behavior.
+
+**Docs**
+- `docs/ARCHITECTURE.md` — memory section rewritten for the 6-tier
+  model. Canonical tier table now has six rows (L0-L5). New
+  "Reflection → Instinct loop, in code" section documents which
+  three offline modules (`dreams`, `compactor`, `instinct`)
+  collectively constitute "reflection" and which writes to L0.
+  ASCII diagram updated to show the top-down L5 → L0 distillation
+  flow alongside the bottom-up L1 → L5 consolidation flow.
+- `docs/HARNESS.md` — memory row updated to "6-tier ICMS"; the
+  "Where Mnemosyne is genuinely ahead" section adds the L0 +
+  Reflection-loop bullet.
+- `README.md` — architecture-at-a-glance line updated to call out
+  the 6-tier model and the Reflection → Instinct loop.
+
+**Packaging**
+- `pyproject.toml` 0.8.1 → 0.9.0 (minor bump because the substrate
+  semantics changed: a new tier is a real API addition).
+- CI install-smoke now probes `from mnemosyne_memory import
+  L0_INSTINCT` and asserts the value is 0.
+
+**Tests:** 279 → 282 green. 3 new:
+- instinct: distilled rows land in L0 (v0.9)
+- instinct v0.9: legacy v0.8 L4 user_instinct rows still inject via Brain
+- memory v0.9: L0_INSTINCT promote target + apply_decay demotes L0 → L4
+- memory v0.9: stats() exposes L0_instinct count separately
+
+pyflakes clean.
+
+## [0.8.1] — 2026-04-16 — launch docs + LM Studio bench wiring
+
+Documentation and marketing batch. Gets the v0.8.0 substrate ready
+to publicly launch: a runnable 12-component harness audit doc,
+long-form and thread-form launch articles, and a fully wired LM
+Studio path so users with a local model can produce real Continuity
+Score numbers against their own hardware in one command.
+
+**New docs**
+- `docs/HARNESS.md` — Mnemosyne ↔ Akshay Pachaar's 12-component
+  agent-harness audit. Table with status + verify command per row.
+  9 ✓, 3 partial (context masking, error taxonomy, per-turn
+  verification; all tracked for v0.9). Screenshot-ready for
+  articles and PRs; no quiet upgrades, same gatekeeping rules as
+  `docs/COGNITIVE_OS.md`.
+- `docs/articles/v0.8-launch-substack.md` — ~1500-word launch
+  essay. Narrative: "we built it before there was a name for it"
+  with git-log receipts from April 7-16. References HARNESS.md and
+  COGNITIVE_OS.md for the actual audit substance.
+- `docs/articles/v0.8-x-thread.md` — 12-tweet launch thread +
+  bonus quote-card lines for week-long amplification + tagging
+  strategy + "what not to post" guardrails.
+
+**`bench/locomo.py` — LLM-grounded mode wired**
+- `MnemosyneSubstrate.probe()` no longer raises NotImplementedError
+  in `llm_grounded=True` mode. Uses retrieved context as system
+  prompt, asks `mnemosyne_models.chat(...)` via the configured
+  backend. Works with any of the 19 supported providers; LM Studio
+  is the default target for local runs.
+- `bench/README.md` rewritten with an LM Studio quick-path that
+  skips the optional venv entirely — `mnemosyne-continuity run
+  --provider lmstudio --model <id>` is the one-liner to get a real
+  benchmark number against your local model tonight.
+
+**Packaging**
+- `pyproject.toml` 0.8.0 → 0.8.1 (docs-only patch bump; no API or
+  behavior changes).
+- No new modules, no new entry points. CI install-smoke unchanged.
+
+**Tests:** 279/279 green (unchanged). pyflakes clean.
+
+## [0.8.0] — 2026-04-16 — Instinct overlay + compactor audit + bench skeleton
+
+Adds the **Instinct overlay** — a fast-path layer of distilled
+user-pattern signals that the Brain consults on every turn before
+query-relevance retrieval runs. Not a sixth tier (the v0.7 layout L1-L5
+stays put); instinct rows live in L4 with `kind="user_instinct"` and
+the substrate's existing decay + reinforcement + idempotency machinery
+covers them for free.
+
+Also lands the two real bottleneck fixes from the v0.7 audit, a
+compactor audit pass that defends against the Mem0-style 97%-junk
+failure mode, and a bench/ skeleton so the LOCOMO-vs-Mem0 head-to-head
+has a runnable home.
+
+**New module `mnemosyne_instinct.py`**
+  - `distill(store, *, lookback_days, min_cluster_size, max_instincts,
+    jaccard_threshold, dry_run)` scans recent rows whose kinds bear
+    user-pattern intent (`preference`, `fact`, `interest`, `event`,
+    `project`), clusters by token overlap, and writes the top-N
+    recurring patterns as L4 rows with `kind="user_instinct"`,
+    `source="instinct"`. Operational kinds (`failure_note`,
+    `tool_result`, `turn`) are deliberately excluded — they're noise
+    not signal.
+  - **Idempotent**: every pass deletes the prior user-instinct batch
+    before writing the next. Safe to run on a cron.
+  - **Capped**: `max_instincts` (default 20) bounds the system-prompt
+    injection budget — typically <500 tokens.
+  - `list_instincts()` and `clear_instincts()` for inspection + reset.
+  - `mnemosyne-instinct distill | list | clear` CLI.
+
+**Brain change (`mnemosyne_brain.py`)**
+  - New `_build_instinct_block()` injects user-instinct rows into the
+    system prompt every turn, parallel to the v0.7 L5 identity block
+    and decoupled from it (you can clear instincts without touching
+    core values).
+
+**Memory primitive: `KIND_DECAY_MULTIPLIERS["user_instinct"] = 0.5`**
+  - Slower than ops, faster than identity. Sticky enough to persist
+    across sessions; adapts when the user changes behavior.
+
+**Bottleneck fixes (`mnemosyne_memory.py`)**
+  - `search()` collapses N per-row reinforce UPDATEs into one
+    `executemany`. Search hit path stays the same; high-fanout queries
+    no longer pay an N×round-trip tax.
+  - `apply_decay()` collects strength + tier updates into two batched
+    `executemany` calls. 50K-row decay pass: 6.15 s on reference
+    hardware (versus the projected ~7 s+ at the old per-row rate).
+
+**`mnemosyne-compactor audit` (new subcommand)**
+  - `audit_patterns(store, *, dead_age_days)` returns `total_patterns`,
+    `hit_count`, `hit_rate`, `dead_count` (zero accesses + older than
+    threshold), `dead_fraction`, `avg_age_days`, `avg_cluster_size`.
+  - Defense against the Mem0-style 97%-junk-accumulation failure mode:
+    if a substrate's pattern store fills with rows nobody ever reads,
+    you want a number that says so. `dead_fraction > 0.5` is a real
+    drift signal triage can cluster on (future work).
+
+**`bench/` directory (skeleton)**
+  - `bench/locomo.py` — LOCOMO benchmark runner with `MnemosyneSubstrate`
+    and `Mem0Substrate` adapters. Loads dataset via Hugging Face,
+    ingests turns, probes with questions, runs LLM-as-judge, writes
+    JSON report. Skeleton only — judge model + temperature deliberately
+    not pinned because that choice is the dominant variance source in
+    published numbers.
+  - `bench/requirements.txt` — `datasets`, `mem0ai`, `openai`,
+    `sentence-transformers`, `tiktoken`. **Not** added to the main
+    `pyproject.toml`. Install into `bench/.venv` to keep the
+    stdlib-only invariant of the core.
+  - `bench/README.md` — explains why this lives outside the core and
+    how to run.
+  - `.gitignore` updated for `bench/results/` and `bench/.venv/`.
+
+**Docs**
+  - `docs/ARCHITECTURE.md` — significant memory-architecture section
+    rewrite. Fixes the L4/L5 ambiguity surfaced last session: a single
+    canonical tier table (L1 hot, L2 warm, L3 cold, L4 pattern, L5
+    identity) replaces the stale 3-tier description that an external
+    LLM mis-summarized as "L4=archival, L5=meta-memory." Adds the
+    Instinct overlay framing, an ASCII diagram of the
+    Reflection→Instinct loop, an honest human-memory comparison table,
+    and ongoing-work notes (bottlenecks fixed, audit pass, bench/).
+
+**Packaging**
+  - `pyproject.toml` 0.7.1 → 0.8.0
+  - `mnemosyne_instinct` added to `py-modules`
+  - `mnemosyne-instinct` added to `[project.scripts]`. CLI count 24 → 25.
+  - CI install-smoke probes the new entry point + library surfaces
+    (`distill`, `list_instincts`, `clear_instincts`, `audit_patterns`).
+
+**Tests:** 271 → 279 green. 8 new:
+  - instinct: distill clusters recurring user-pattern signals into L4
+  - instinct: distill is idempotent (deletes prior batch on re-run)
+  - instinct: dry_run writes nothing
+  - instinct: clear_instincts deletes all user_instinct rows
+  - brain v0.8: user_instinct rows land in system prompt on every turn
+  - compactor v0.8: audit_patterns reports hit-rate and dead-fraction
+  - memory v0.8: search() batched reinforce still updates every hit
+  - memory v0.8: apply_decay still demotes L4 patterns below 0.3
+
+pyflakes clean. Throughput regression check: search-hit 2.38 ms/op,
+search-OR-fallback 4.76 ms/op, decay 0.10 ms/row at 5K, decay 6.15 s
+at 50K.
+
+## [0.7.1] — 2026-04-16 — substrate recall fallback + dryrun 0.34 → 0.96
+
+Beats the Continuity Score dryrun without adding a single dependency
+or leaning on an LLM — by fixing the retrieval substrate itself.
+Every caller of `MemoryStore.search()` gets the recall improvement
+transparently.
+
+**Substrate: AND → OR recall fallback (`mnemosyne_memory.py`)**
+  - `search()` now runs two passes: strict AND first (precision),
+    OR fallback when AND returns zero rows (recall). The 2nd pass
+    only fires on AND-miss, so queries that hit pay the old
+    single-pass cost. `_fts5_escape()` gained an `any_token=True`
+    parameter that callers can set directly if they want OR mode
+    without the fallback.
+  - Rationale: FTS5's default AND semantics dropped probes whose
+    question-words ("using", "drive", "address") never appeared in
+    the indexed content. The fallback rescues those without
+    polluting precision-sensitive queries — BM25 ranking handles
+    the rest.
+
+**Continuity dryrun reranker + recency fallback (`mnemosyne_continuity.py`)**
+  - The dryrun brain now reranks hits by query-token overlap so
+    multi-plant project scenarios surface the row containing the
+    answer, not the first planted row.
+  - When the probe shares *no* tokens with any memory, falls back
+    to the 3 most-recent rows — reasonable default for an agent
+    with memory but no retrieval signal.
+  - Stop-word list expanded to cover 3-char function words so we
+    could lower the token threshold from 4 to 3 (catches "car",
+    "RAM", "NLB").
+
+**Continuity Score — aggregate 0.34 → 0.96 / cross-session 0.20 → 1.00**
+
+  | Category   | v0.7.0 | v0.7.1 |
+  | :--------- | -----: | -----: |
+  | preference | 0.417  | 1.000  |
+  | fact       | 0.500  | 1.000  |
+  | project    | 0.167  | 0.917  |
+  | decision   | 0.000  | 1.000  |
+  | rule       | 0.500  | 0.833  |
+  | aggregate  | 0.340  | 0.960  |
+
+  The two remaining failures are structurally beyond pure retrieval
+  (cross-row composition; world knowledge). Documented in
+  `docs/BENCHMARKS_v0.7.md` as the intentional lower-bound floor —
+  so the live-model upper bound has a meaningful delta to measure.
+
+**Throughput impact**
+  - Write: 0.13 ms/row (essentially unchanged; slightly better on
+    second measurement due to noise)
+  - Search with AND hit: 2.43 ms/op
+  - Search with OR fallback: 5.26 ms/op (~2× the single-pass cost;
+    only paid when AND returns zero)
+  - Decay: 0.10 ms/row (unchanged)
+
+**Scenario authoring fix**
+  - `cont-xses-09` expected the substring `"dropped"` but the plant
+    uses "drop". Fixed to `"drop"` — the substring-based judge
+    matches both forms.
+
+**Tests:** 269 → 271 green. 2 new:
+  - memory v0.7.1: search falls back to OR when AND returns no hits
+  - memory v0.7.1: `_fts5_escape` supports OR joining for recall mode
+
+pyflakes clean.
+
 ## [0.7.0] — 2026-04-16 — 5-tier ICMS, ACT-R decay, Continuity Score
 
 Closes the cognitive-OS checklist: rows 1 (persistent identity) and

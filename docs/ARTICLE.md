@@ -3,6 +3,13 @@
 *A local-first LLM agent framework. Stdlib only. What we built, what
 we learned, and why we refuse to call it consciousness.*
 
+> **Note:** This is the v0.5-era long-form essay (April 15 2026). The
+> v0.8 launch piece with the updated "agent harness" framing lives at
+> [`docs/articles/v0.8-launch-substack.md`](./articles/v0.8-launch-substack.md).
+> Specifics in the body below (tier counts, component inventories,
+> benchmark numbers) reflect v0.5 state; see `CHANGELOG.md` for the
+> current shape. Kept as-is for historical continuity.
+
 ---
 
 ## Preface: what this article is and isn't
@@ -115,7 +122,7 @@ independently testable, and none of them depend on the layers above.
   ─────────────────────────────────────────────────
   Memory + observability                            (v0.1)
   ─────────────────────────────────────────────────
-  mnemosyne_memory — SQLite + FTS5, 3-5 tiers
+  mnemosyne_memory — SQLite + FTS5, 3-tier (current: 6-tier, see CHANGELOG)
   harness_telemetry — event log, secret redaction
   mnemosyne_avatar — derived state, bidirectional feedback
   ─────────────────────────────────────────────────

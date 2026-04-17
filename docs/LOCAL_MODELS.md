@@ -112,8 +112,8 @@ Every Mnemosyne CLI tool works offline:
 The repo is stdlib-only. Once you've cloned it and have Python 3.9+, you need zero pip installs from the network:
 
 ```bash
-git clone https://github.com/atxgreene/sturdy-doodle.git
-cd sturdy-doodle
+git clone https://github.com/atxgreene/Mnemosyne.git
+cd Mnemosyne
 python3 -m pip install -e .        # resolves only setuptools, no runtime deps
 ```
 

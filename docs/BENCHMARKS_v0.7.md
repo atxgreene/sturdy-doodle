@@ -12,13 +12,20 @@ SQLite (FTS5 compiled in), no GPU. Single-thread throughput.
 ## 1. Memory throughput at 5K rows
 
 Exercises the v0.7 schema (tier + kind + strength columns, ACT-R decay,
-Hebbian reinforcement-on-read) under realistic load.
+Hebbian reinforcement-on-read) and the v0.7.1 AND→OR recall fallback
+under realistic load.
 
-| Operation                           | p50       | Per-op       |
-| :---------------------------------- | :-------- | :----------- |
-| `write()`  (5000 rows, mixed tiers) | 783 ms    | **0.16 ms**  |
-| `search()` (1000 queries, FTS5)     | 2.72 s    | **2.72 ms**  |
-| `apply_decay()` (full scan)         | 634 ms    | **0.13 ms**  |
+| Operation                                        | p50      | Per-op       |
+| :----------------------------------------------- | :------- | :----------- |
+| `write()`  (5000 rows, mixed tiers)              | 656 ms   | **0.13 ms**  |
+| `search()` (AND matches; single FTS5 pass)       | 2.43 s   | **2.43 ms**  |
+| `search()` (AND misses; OR fallback engages)     | 5.26 s   | **5.26 ms**  |
+| `apply_decay()` (full scan)                      | 507 ms   | **0.10 ms**  |
+
+The OR-fallback cost (~2.5 ms extra) applies only to queries where
+strict AND returns zero rows — typically paraphrased probes where
+one question-word isn't present in any indexed content. Queries that
+hit short-circuit and pay the single-pass cost.
 
 Reproduce:
 
@@ -90,6 +97,22 @@ Reproduce: see `mnemosyne_compactor.py --help` plus the seed script at
 **dryrun** mode uses only the memory plumbing — no LLM — so it
 measures how many probes the retrieval layer alone can resolve.
 
+### v0.7.1 after substrate improvements
+
+| Category     | Total | Passed | Score  |
+| :----------- | ----: | -----: | :----- |
+| preference   |    12 |     12 | 1.000  |
+| fact         |    14 |     14 | 1.000  |
+| project      |    12 |     11 | 0.917  |
+| decision     |     6 |      6 | 1.000  |
+| rule         |     6 |      5 | 0.833  |
+| **aggregate**|    50 |     48 | **0.960** |
+
+Cross-session subset (plant in session 1, re-open DB in session 2,
+probe): **10 / 10 = 1.00**.
+
+### v0.7.0 initial (for context)
+
 | Category     | Total | Passed | Score  |
 | :----------- | ----: | -----: | :----- |
 | preference   |    12 |      5 | 0.417  |
@@ -99,8 +122,43 @@ measures how many probes the retrieval layer alone can resolve.
 | rule         |     6 |      3 | 0.500  |
 | **aggregate**|    50 |     17 | **0.340** |
 
-Cross-session subset (plant in session 1, re-open DB in session 2,
-probe): **2 / 10 = 0.20**.
+Cross-session subset: **2 / 10 = 0.20**.
+
+### What changed between the two tables
+
+Three substrate-level fixes:
+
+1. **AND → OR recall fallback in `MemoryStore.search()`.** Strict
+   FTS5 AND dropped probes whose question-words ("using", "drive",
+   "address", "originally") never got planted. The two-pass query
+   tries strict AND first (precision) and falls back to OR when
+   AND returns zero (recall). Added in v0.7.1. Costs ~2.5 ms extra
+   when the fallback engages — see §1.
+2. **Continuity runner reranks by query-token overlap.** When multiple
+   rows match, the row whose content contains the most distinct query
+   tokens wins. Multi-plant project scenarios (two turns → one probe)
+   surface the right row instead of the noisier first plant.
+3. **Recency fallback when no tokens overlap.** A probe like "Where
+   am I from originally?" has no token overlap with "My hometown is
+   Portland, Oregon." (both "hometown" and "originally" survive stop-
+   words; neither is in the other string). The substrate returns the
+   most-recent memory in that case — reasonable default for an agent
+   that "remembers something but can't connect it to the question."
+
+The two remaining failures are structurally beyond pure retrieval:
+
+- `cont-proj-04` — needs to compose across two rows ("API gateway is
+  Kong" + "Kong is behind an NLB") to answer "what load balancer
+  fronts our API gateway?"  The NLB token only exists in the second
+  plant, but token-overlap ranking puts the first plant higher. That
+  composition is LLM work.
+- `cont-rule-02` — "What's the capital of France?" while a rule about
+  lowercase is planted. The memory contains the rule; the *answer*
+  (Paris) is world knowledge the retrieval layer doesn't have.
+
+Both are load-bearing for the benchmark — the lower bound *should*
+include a couple of scenarios the memory layer can't solve, so the
+live-model upper bound has a meaningful delta to demonstrate.
 
 Reproduce:
 

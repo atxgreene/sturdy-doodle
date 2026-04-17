@@ -1,5 +1,13 @@
 # Mnemosyne Setup (WSL2 / Ubuntu)
 
+> **Historical document — superseded by [`docs/QUICKSTART.md`](./docs/QUICKSTART.md).**
+>
+> This file describes the *multi-repo era* of Mnemosyne (April 2026, pre-v0.2): a bootstrap that cloned separate `eternal-context` and `fantastic-disco` repos and wired them together. As of v0.2.0, **everything is one pip-installable package** (`pip install mnemosyne-harness`). The multi-repo install path below no longer applies.
+>
+> Kept in the tree because the bootstrap shell scripts (`install-mnemosyne.sh`, `mnemosyne-wizard.sh`, `validate-mnemosyne.sh`) still live at the repo root and still work for the subset of users who want the full WSL2 + Ollama provisioning flow; the Python-package parts of what's described below are obsolete.
+
+---
+
 A reproducible install of the Mnemosyne local-agent stack: `eternal-context` (base agent, ICMS memory, SDI selection, channels) + `mnemosyne-consciousness` (TurboQuant, metacognition, dream consolidation, autobiography) on top of a local Ollama runtime.
 
 This repo holds **only** the bootstrap script and wizard. The two Python packages live in their own repos and are cloned by `install-mnemosyne.sh`.
@@ -123,7 +131,7 @@ sudo apt install -y git curl python3 python3-venv python3-pip
 Clone this repo (or copy the three scripts into a Mnemosyne-Setup folder of your choice) and run the bootstrap from inside it. From WSL:
 
 ```bash
-git clone https://github.com/atxgreene/sturdy-doodle.git ~/mnemosyne-setup
+git clone https://github.com/atxgreene/Mnemosyne.git ~/mnemosyne-setup
 cd ~/mnemosyne-setup
 bash install-mnemosyne.sh
 ```

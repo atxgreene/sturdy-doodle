@@ -95,6 +95,14 @@ class Skill:
     body: str = ""                          # markdown body (progressive-disclosure content)
     source_path: Path | None = None         # where the skill was loaded from
     learned: bool = False                   # True if self-written by the brain
+    # v0.9.2 — tool-result budgeting. When a tool returns more content
+    # than `max_result_size` characters (stringified), the Brain writes
+    # the full output to disk and replaces the in-context result with a
+    # preview + file reference. Defends against the Claude-Code-teardown
+    # failure mode where `cat` on a 1 MB log file fills the context
+    # window with noise and the agent loses coherence. `None` = use the
+    # Brain-wide default (BrainConfig.tool_result_max_chars).
+    max_result_size: int | None = None
 
     def to_openai_tool(self) -> dict[str, Any]:
         """Return the OpenAI-shaped tool definition the model sees."""
@@ -270,6 +278,97 @@ def _coerce(v: str) -> Any:
     if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
         return v[1:-1]
     return v
+
+
+# ---- tool-result budgeting (v0.9.2) -----------------------------------------
+
+DEFAULT_TOOL_RESULT_MAX_CHARS = 8000
+"""Brain-wide default when a Skill doesn't set ``max_result_size``.
+
+8000 characters is ≈ 2000 tokens on a typical tokenizer — roughly the
+size where a single tool result starts to dominate a turn's prompt
+budget on 32k-context models. Override per-skill by setting
+``Skill.max_result_size`` or globally via ``BrainConfig.tool_result_max_chars``.
+"""
+
+
+def budget_tool_result(
+    result: Any,
+    *,
+    skill_name: str,
+    max_result_size: int,
+    out_dir: Path,
+) -> tuple[Any, dict[str, Any] | None]:
+    """Enforce a size budget on a tool result.
+
+    Returns ``(maybe_replaced_result, budget_info)``. When the stringified
+    result is at or under ``max_result_size`` characters, the original
+    result and ``None`` are returned — the hot path pays one ``len()`` and
+    nothing else.
+
+    When the result is larger, the full stringified text is persisted to
+    ``out_dir/<YYYY-MM-DD>/<HHMMSSfff>-<skill>-<short-uuid>.txt`` and the
+    returned result is a compact string that tells the model:
+
+        [tool output budget: 1482347 chars > 8000 max]
+        [full output saved to: /path/to/file.txt]
+        [preview (first N chars):]
+        <truncated stringified result>
+
+    ``budget_info`` is a dict with ``original_size``, ``max_size``,
+    ``output_path``, and ``preview_size`` so the caller (Brain) can emit a
+    ``tool_result_budget_hit`` telemetry event.
+
+    Errors persisting to disk are non-fatal — the function falls back to
+    returning a truncation-only budgeted string with a warning in the
+    preview. The agent loop must never crash because the budgeter
+    couldn't write a file.
+    """
+    if isinstance(result, str):
+        stringified = result
+    else:
+        stringified = json.dumps(result, default=str, indent=None,
+                                  separators=(",", ":"))
+    size = len(stringified)
+    if size <= max_result_size:
+        return result, None
+
+    # Exceeds budget — persist full text + return preview
+    import uuid as _uuid
+    now = datetime.now(timezone.utc)
+    day_dir = out_dir / now.strftime("%Y-%m-%d")
+    path: Path | None = None
+    try:
+        day_dir.mkdir(parents=True, exist_ok=True)
+        fname = (
+            f"{now.strftime('%H%M%S%f')[:-3]}-"
+            f"{re.sub(r'[^a-zA-Z0-9_-]', '_', skill_name)[:40]}-"
+            f"{_uuid.uuid4().hex[:8]}.txt"
+        )
+        path = day_dir / fname
+        path.write_text(stringified, encoding="utf-8", errors="replace")
+    except OSError:
+        path = None  # disk write failed — preview-only fallback
+
+    # Reserve ~400 chars of overhead (headers + file path) inside the
+    # budget; the rest goes to preview. Floor at 200 chars so the model
+    # always sees something.
+    preview_budget = max(200, max_result_size - 400)
+    preview = stringified[:preview_budget]
+    header_lines = [f"[tool output budget: {size} chars > {max_result_size} max]"]
+    if path is not None:
+        header_lines.append(f"[full output saved to: {path}]")
+    else:
+        header_lines.append("[full output not persisted (disk error); preview only]")
+    header_lines.append(f"[preview (first {len(preview)} chars):]")
+    budgeted = "\n".join(header_lines) + "\n" + preview
+
+    return budgeted, {
+        "original_size": size,
+        "max_size": max_result_size,
+        "output_path": str(path) if path else None,
+        "preview_size": len(preview),
+    }
 
 
 # ---- registry ---------------------------------------------------------------

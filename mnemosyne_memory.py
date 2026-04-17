@@ -96,13 +96,20 @@ from typing import Any
 
 
 # Tier constants — match eternal-context's ICMS L1/L2/L3
+L0_INSTINCT = 0     # v0.9: fast-path automatic reactions; populated by
+                    #       mnemosyne_instinct.distill() from L5+lower
+                    #       (the "Reflection -> Instinct" loop). Always
+                    #       checked first; smallest token budget.
 L1_HOT = 1
 L2_WARM = 2
 L3_COLD = 3
 L4_PATTERN = 4      # v0.7: traits, muscle-memory-like behaviors
-L5_IDENTITY = 5     # v0.7: core values, non-negotiables (human-approved)
+L5_IDENTITY = 5     # v0.7: core values, non-negotiables (human-approved).
+                    #       v0.9: also documented as the "Reflection"
+                    #       role — the layer whose distillation feeds L0.
 
 _TIER_NAMES = {
+    L0_INSTINCT: "L0_instinct",
     L1_HOT: "L1_hot",
     L2_WARM: "L2_warm",
     L3_COLD: "L3_cold",
@@ -123,6 +130,11 @@ KIND_DECAY_MULTIPLIERS: dict[str, float] = {
     # knowledge-class — baseline decay
     "fact":           1.0,
     "pattern":        0.5,   # patterns live longer than facts
+    "user_instinct":  0.4,   # v0.9 — Instinct (L0) decay between identity
+                             # (0.1) and pattern (0.5). Sticky enough to
+                             # persist; adapts when the user changes
+                             # behavior. Tuned a touch slower than v0.8
+                             # since L0 should feel "primal," not bursty.
     "trait":          0.3,
     "interest":       0.8,
     "dream_abstract": 1.0,
@@ -453,38 +465,57 @@ class MemoryStore:
 
         Uses FTS5 if available, falls back to LIKE substring match otherwise.
         `tier_max` restricts to tiers ≤ N (e.g. tier_max=2 excludes L3 cold).
+
+        Two-pass recall (v0.7.1):
+          1. Strict AND — every query term must match the same row.
+             High precision; preferred when the AND set is non-empty.
+          2. OR fallback — if AND returns zero, relax to OR across
+             terms. Rescues probes where one query word is absent
+             from the indexed doc (e.g. probe "What cache are we
+             using?" against plant "... for the session cache."
+             where "using" never got planted). BM25 ranking still
+             prioritizes docs that match multiple terms.
+
+        Fallback is transparent — callers get the best of both
+        without changing call sites. The strength boost is applied
+        on whichever pass returns rows.
         """
         results: list[dict[str, Any]] = []
+
+        def _run_fts(match_expr: str) -> list[Any]:
+            sql = """
+                SELECT m.*, memories_fts.rank AS relevance
+                FROM memories_fts
+                JOIN memories m ON m.id = memories_fts.rowid
+                WHERE memories_fts MATCH ?
+            """
+            params: list[Any] = [match_expr]
+            if tier_max is not None:
+                sql += " AND m.tier <= ?"
+                params.append(tier_max)
+            if kind:
+                sql += " AND m.kind = ?"
+                params.append(kind)
+            if source:
+                sql += " AND m.source = ?"
+                params.append(source)
+            # v0.7: rank multiplied by memory strength so reinforced
+            # memories naturally outrank unused ones.
+            sql += (" ORDER BY memories_fts.rank * "
+                    "(1.0 + m.strength) LIMIT ?")
+            params.append(limit)
+            return self._conn.execute(sql, params).fetchall()
+
         with self._lock:
             if self._has_fts5 and query.strip():
-                sql = """
-                    SELECT m.*, memories_fts.rank AS relevance
-                    FROM memories_fts
-                    JOIN memories m ON m.id = memories_fts.rowid
-                    WHERE memories_fts MATCH ?
-                """
-                params: list[Any] = [_fts5_escape(query)]
-                if tier_max is not None:
-                    sql += " AND m.tier <= ?"
-                    params.append(tier_max)
-                if kind:
-                    sql += " AND m.kind = ?"
-                    params.append(kind)
-                if source:
-                    sql += " AND m.source = ?"
-                    params.append(source)
-                # v0.7: rank multiplied by memory strength so reinforced
-                # memories naturally outrank unused ones. FTS5 rank is
-                # negative (lower = more relevant); multiplying by
-                # (1 + strength) preserves FTS5's ranking within a tier
-                # while boosting stronger rows.
-                sql += (" ORDER BY memories_fts.rank * "
-                        "(1.0 + m.strength) LIMIT ?")
-                params.append(limit)
+                rows = _run_fts(_fts5_escape(query, any_token=False))
+                if not rows:
+                    # OR fallback: widen recall when strict AND missed
+                    rows = _run_fts(_fts5_escape(query, any_token=True))
             else:
-                # Fallback: LIKE scan
+                # Fallback: LIKE scan (FTS5 unavailable or empty query)
                 sql = "SELECT *, 0.0 AS relevance FROM memories WHERE 1=1"
-                params = []
+                params: list[Any] = []
                 if query.strip():
                     sql += " AND content LIKE ?"
                     params.append(f"%{query}%")
@@ -499,22 +530,25 @@ class MemoryStore:
                     params.append(source)
                 sql += " ORDER BY last_accessed_utc DESC NULLS LAST, created_utc DESC LIMIT ?"
                 params.append(limit)
-
-            rows = self._conn.execute(sql, params).fetchall()
-            # Touch access_count + last_accessed_utc + reinforce strength
-            # (Hebbian: used memories strengthen asymptotically toward 1.0)
+                # Touch access_count + last_accessed_utc + reinforce strength
+            # (Hebbian: used memories strengthen asymptotically toward 1.0).
+            # v0.8: batched via executemany — one round-trip instead of N.
             now = _utcnow()
+            updates: list[tuple[str, float, int]] = []
             for row in rows:
                 results.append(dict(row))
-                current_s = float(row["strength"]) if "strength" in row.keys() else 1.0
+                current_s = (float(row["strength"])
+                             if "strength" in row.keys() else 1.0)
                 new_s = current_s + 0.05 * (1.0 - current_s)
-                self._conn.execute(
+                updates.append((now, new_s, row["id"]))
+            if updates:
+                self._conn.executemany(
                     """UPDATE memories
                        SET access_count = access_count + 1,
                            last_accessed_utc = ?,
                            strength = ?
                        WHERE id = ?""",
-                    (now, new_s, row["id"]),
+                    updates,
                 )
         self._emit("memory_read", query=query, hits=len(results),
                    tier_max=tier_max, kind=kind)
@@ -525,16 +559,23 @@ class MemoryStore:
     def promote(self, memory_id: int, *, to_tier: int) -> None:
         """Move a memory to a different tier.
 
-        v0.7 expanded the tier set from 3 to 5:
+        v0.9 6-tier model:
+          L0 (instinct) is the fast-path automatic-reaction layer,
+              populated only by mnemosyne_instinct.distill() in the
+              Reflection -> Instinct loop. Direct promotion to L0 is
+              allowed for advanced callers but uncommon; normal usage
+              is to let the distiller manage L0 contents.
           L1 (hot), L2 (warm), L3 (cold) are the original hierarchy.
           L4 (pattern) is produced by mnemosyne_compactor — persistent
               traits and muscle-memory behaviors promoted from recurring
               L3 content.
-          L5 (identity) is reserved for human-approved core values. The
-              compactor never writes here directly; only explicit API
-              calls (or the user via the UI) can elevate to L5.
+          L5 (identity / reflection role) is reserved for human-approved
+              core values. The compactor never writes here directly;
+              only explicit API calls (or the user via the UI) can
+              elevate to L5.
         """
-        if to_tier not in (L1_HOT, L2_WARM, L3_COLD, L4_PATTERN, L5_IDENTITY):
+        if to_tier not in (L0_INSTINCT, L1_HOT, L2_WARM, L3_COLD,
+                           L4_PATTERN, L5_IDENTITY):
             raise ValueError(f"invalid tier: {to_tier}")
         now = _utcnow()
         with self._lock:
@@ -571,18 +612,23 @@ class MemoryStore:
 
         Called by the serve daemon's nightly cron; safe to invoke
         manually via `mnemosyne-memory decay`.
+
+        v0.8: per-row UPDATEs collapsed into two batched executemany
+        calls (strength updates + tier demotions), so a 50K-row scan
+        is one read + at most two writes instead of N+1 round-trips.
         """
         from datetime import datetime as _dt, timezone as _tz
         now = _dt.now(_tz.utc) if now_utc is None else _dt.fromisoformat(
             now_utc.replace("Z", "+00:00"))
-        adjusted = 0
-        demoted = 0
         evicted = 0
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, tier, kind, strength, access_count, "
                 "created_utc, last_accessed_utc FROM memories"
             ).fetchall()
+
+        strength_updates: list[tuple[float, int]] = []
+        tier_updates: list[tuple[int, int]] = []
         for r in rows:
             mid = r["id"]
             kind = r["kind"] or "fact"
@@ -601,7 +647,8 @@ class MemoryStore:
             base = _actr_base_level(max(1, uses), since_first_s)
             # Compress ACT-R output to [0, 1] and multiply by kind rate
             baseline = min(1.0, max(0.0, base / 5.0))
-            kind_mult = KIND_DECAY_MULTIPLIERS.get(kind, DEFAULT_DECAY_MULTIPLIER)
+            kind_mult = KIND_DECAY_MULTIPLIERS.get(
+                kind, DEFAULT_DECAY_MULTIPLIER)
             # Time-since-last weights the decay — use a half-life
             # tied to kind_mult. 7-day half-life at mult=1.0.
             half_life_s = max(3600.0, 86400.0 * 7.0 / max(0.05, kind_mult))
@@ -609,30 +656,35 @@ class MemoryStore:
             new_strength = max(0.0, min(1.0,
                 0.4 * baseline + 0.6 * strength * decay_factor))
             if abs(new_strength - strength) > 0.01:
-                with self._lock:
-                    self._conn.execute(
-                        "UPDATE memories SET strength = ? WHERE id = ?",
-                        (new_strength, mid),
-                    )
-                adjusted += 1
-            # Demote below 0.3 from L4 → L3, from L1/L2 → next tier
+                strength_updates.append((new_strength, mid))
+            # Demotion rules:
+            #   L0 instinct  -> L4 pattern  (stale instinct falls back
+            #                   to pattern; the distiller will rebuild
+            #                   the L0 batch on its next pass)
+            #   L4 pattern   -> L3 cold
+            #   L1/L2 hot/warm -> next tier (only if effectively dead)
             if new_strength < 0.3:
                 tier = r["tier"]
-                if tier == L4_PATTERN:
-                    with self._lock:
-                        self._conn.execute(
-                            "UPDATE memories SET tier = ? WHERE id = ?",
-                            (L3_COLD, mid),
-                        )
-                    demoted += 1
+                if tier == L0_INSTINCT:
+                    tier_updates.append((L4_PATTERN, mid))
+                elif tier == L4_PATTERN:
+                    tier_updates.append((L3_COLD, mid))
                 elif tier in (L1_HOT, L2_WARM) and new_strength < 0.1:
-                    # Only demote hot/warm to cold if effectively dead
-                    with self._lock:
-                        self._conn.execute(
-                            "UPDATE memories SET tier = ? WHERE id = ?",
-                            (tier + 1, mid),
-                        )
-                    demoted += 1
+                    tier_updates.append((tier + 1, mid))
+
+        with self._lock:
+            if strength_updates:
+                self._conn.executemany(
+                    "UPDATE memories SET strength = ? WHERE id = ?",
+                    strength_updates,
+                )
+            if tier_updates:
+                self._conn.executemany(
+                    "UPDATE memories SET tier = ? WHERE id = ?",
+                    tier_updates,
+                )
+        adjusted = len(strength_updates)
+        demoted = len(tier_updates)
         self._emit("memory_decay_pass", adjusted=adjusted,
                    demoted=demoted, evicted=evicted)
         return {"adjusted": adjusted, "demoted": demoted, "evicted": evicted}
@@ -691,7 +743,8 @@ class MemoryStore:
                 _TIER_NAMES[t]: self._conn.execute(
                     "SELECT COUNT(*) FROM memories WHERE tier = ?", (t,)
                 ).fetchone()[0]
-                for t in (L1_HOT, L2_WARM, L3_COLD, L4_PATTERN, L5_IDENTITY)
+                for t in (L0_INSTINCT, L1_HOT, L2_WARM, L3_COLD,
+                          L4_PATTERN, L5_IDENTITY)
             }
             by_kind = dict(
                 self._conn.execute(
@@ -837,16 +890,26 @@ class MemoryStore:
         self.close()
 
 
-def _fts5_escape(query: str) -> str:
+def _fts5_escape(query: str, *, any_token: bool = False) -> str:
     """Escape an FTS5 query string to avoid syntax errors on user input.
 
     Quotes each term as a phrase so operators in user input don't break.
     Empty input returns '""' which FTS5 treats as no-match.
+
+    any_token=False  →  AND semantics (space-separated terms)
+    any_token=True   →  OR  semantics (`"a" OR "b" OR "c"`)
+
+    OR mode is used as a recall fallback by `MemoryStore.search()` when
+    strict AND returns zero rows. Callers rarely need to pick a mode
+    directly.
     """
     tokens = [t for t in query.split() if t]
     if not tokens:
         return '""'
-    return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+    quoted = ['"' + t.replace('"', '""') + '"' for t in tokens]
+    if any_token and len(quoted) > 1:
+        return " OR ".join(quoted)
+    return " ".join(quoted)
 
 
 # ---- CLI (smoke test) -------------------------------------------------------
@@ -867,7 +930,7 @@ def _main(argv: list[str] | None = None) -> int:
     wp.add_argument("--source", default="cli")
     wp.add_argument("--kind", default="fact")
     wp.add_argument("--tier", type=int, default=L2_WARM,
-                    choices=[1, 2, 3, 4, 5])
+                    choices=[0, 1, 2, 3, 4, 5])
 
     sp = sub.add_parser("search", help="full-text search")
     sp.add_argument("query")

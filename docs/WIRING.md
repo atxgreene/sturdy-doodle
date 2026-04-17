@@ -19,8 +19,8 @@ run_id = ht.create_run(
     tags=["live", "prod"],
     notes="daily assistant, 2026-04-09",
     freeze_files=[
-        "/path/to/sturdy-doodle/install-mnemosyne.sh",
-        "/path/to/sturdy-doodle/mnemosyne-wizard.sh",
+        "/path/to/Mnemosyne/install-mnemosyne.sh",
+        "/path/to/Mnemosyne/mnemosyne-wizard.sh",
     ],
 )
 

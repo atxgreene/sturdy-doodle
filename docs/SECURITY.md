@@ -172,7 +172,7 @@ mnemosyne-resolver check --strict   # exit nonzero on warnings too
 
 ## Reporting a vulnerability
 
-Open a [GitHub issue](https://github.com/atxgreene/sturdy-doodle/issues)
+Open a [GitHub issue](https://github.com/atxgreene/Mnemosyne/issues)
 prefixed `[security]`. For sensitive reports, email the maintainer
 listed in `pyproject.toml`. Please include:
 

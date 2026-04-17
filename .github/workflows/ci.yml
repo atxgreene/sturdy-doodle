@@ -98,7 +98,7 @@ jobs:
           python3 -m venv /tmp/ci-venv
           /tmp/ci-venv/bin/pip install --quiet --upgrade pip
           /tmp/ci-venv/bin/pip install -e .
-      - name: Verify all 22 entry points land on $PATH
+      - name: Verify all 25 entry points land on $PATH
         run: |
           # Stable v0.2.x surface
           for cmd in mnemosyne-experiments mnemosyne-pipeline \
@@ -108,16 +108,17 @@ jobs:
             [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
           done
           # v0.2.0+ rigor pass + v0.3.x UI / resolver + v0.5.0 adapter
-          # + v0.7.0 compactor & continuity
+          # + v0.7.0 compactor & continuity + v0.8.0 instinct
           for cmd in mnemosyne-proposer mnemosyne-dreams mnemosyne-apply \
                     mnemosyne-scengen mnemosyne-goals mnemosyne-mcp \
                     mnemosyne-serve mnemosyne-train mnemosyne-batch \
                     mnemosyne-datagen mnemosyne-avatar mnemosyne-resolver \
                     mnemosyne-adapter-claude-code \
-                    mnemosyne-compactor mnemosyne-continuity; do
+                    mnemosyne-compactor mnemosyne-continuity \
+                    mnemosyne-instinct; do
             [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
           done
-          echo "all 24 entry points installed"
+          echo "all 25 entry points installed"
       - name: Verify library imports without sys.path shims
         run: |
           /tmp/ci-venv/bin/python3 -c "
@@ -147,9 +148,14 @@ jobs:
           from mnemosyne_predictions import predict, observe, score_events, calibration_trait
           # v0.7.0 library surfaces
           from mnemosyne_memory import L4_PATTERN, L5_IDENTITY, KIND_DECAY_MULTIPLIERS
-          from mnemosyne_compactor import compact_patterns
+          from mnemosyne_compactor import compact_patterns, audit_patterns
           from mnemosyne_continuity import load_scenarios, run_continuity, judge_response
-          print('all 26+ library surfaces import cleanly')
+          # v0.8.0 library surfaces
+          from mnemosyne_instinct import distill, list_instincts, clear_instincts
+          # v0.9.0 — Instinct promoted to its own L0 tier
+          from mnemosyne_memory import L0_INSTINCT
+          assert L0_INSTINCT == 0, L0_INSTINCT
+          print('all 28+ library surfaces import cleanly (incl. L0_INSTINCT)')
           "
       - name: Verify UI static assets ship with the package
         run: |
