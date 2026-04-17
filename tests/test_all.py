@@ -4996,6 +4996,216 @@ def _():
         shutil.rmtree(pd)
 
 
+# =============================================================================
+#  v0.9.2: tool-result budgeting
+# =============================================================================
+
+@test("budget_tool_result: small results pass through unchanged")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        from mnemosyne_skills import budget_tool_result
+        r, info = budget_tool_result(
+            "short string", skill_name="t",
+            max_result_size=8000, out_dir=pd,
+        )
+        assert r == "short string"
+        assert info is None
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("budget_tool_result: large string gets budgeted + persisted")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        from mnemosyne_skills import budget_tool_result
+        big = "y" * 15000
+        r, info = budget_tool_result(
+            big, skill_name="read_file",
+            max_result_size=4000, out_dir=pd,
+        )
+        assert info is not None
+        assert info["original_size"] == 15000
+        assert info["max_size"] == 4000
+        assert isinstance(r, str)
+        assert "[tool output budget: 15000 chars" in r
+        assert "[full output saved to:" in r
+        # Full content on disk
+        assert info["output_path"] is not None
+        assert Path(info["output_path"]).read_text() == big
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("budget_tool_result: large dict JSON-encoded, then budgeted")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        from mnemosyne_skills import budget_tool_result
+        huge = {"items": ["row" + str(i) for i in range(5000)]}
+        r, info = budget_tool_result(
+            huge, skill_name="query",
+            max_result_size=2000, out_dir=pd,
+        )
+        assert info is not None
+        assert info["original_size"] > 2000
+        assert isinstance(r, str)
+        assert info["output_path"] is not None
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.2: oversized tool result is budgeted in-context + persisted")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        big_payload = "z" * 20000
+
+        def giant_read(**_: Any) -> dict[str, Any]:
+            return {"content": big_payload}
+
+        reg = sk.SkillRegistry()
+        reg.register(sk.Skill(
+            name="giant_read", description="reads big",
+            invocation="python", callable=giant_read,
+        ))
+        mem = mm.MemoryStore(path=pd / "m.db")
+        captured: list[list[dict[str, Any]]] = []
+        turn_state = {"i": 0}
+
+        def fake_chat(messages, **kw):
+            captured.append([dict(m) for m in messages])
+            turn_state["i"] += 1
+            if turn_state["i"] == 1:
+                return {"text": "", "tool_calls": [
+                    {"id": "c1", "name": "giant_read", "arguments": {}},
+                ], "status": "ok", "usage": {}}
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(
+            config=br.BrainConfig(
+                enforce_identity_lock=False,
+                tool_result_max_chars=4000,
+            ),
+            chat_fn=fake_chat, memory=mem, skills=reg,
+        )
+        b.turn("read the big thing")
+
+        # 2nd chat call's message list contains the budgeted tool msg
+        last_msgs = captured[-1]
+        tool_msg = next((m for m in last_msgs
+                         if m.get("role") == "tool"), None)
+        assert tool_msg is not None
+        content = tool_msg["content"]
+        assert "[tool output budget:" in content
+        assert "[full output saved to:" in content
+        # Budgeted content is much smaller than the original
+        assert len(content) < 8000, len(content)
+
+        # The persisted file exists and round-trips the full payload
+        import re as _re
+        m = _re.search(r"saved to: (.+?)\]", content)
+        assert m, content
+        saved = Path(m.group(1))
+        assert saved.is_file(), saved
+        assert big_payload in saved.read_text()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.2: tool_result_max_chars=0 disables budgeting entirely")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        big_payload = "w" * 20000
+
+        def giant(**_: Any) -> dict[str, Any]:
+            return {"content": big_payload}
+
+        reg = sk.SkillRegistry()
+        reg.register(sk.Skill(
+            name="giant", description="",
+            invocation="python", callable=giant,
+        ))
+        mem = mm.MemoryStore(path=pd / "m.db")
+        captured: list[list[dict[str, Any]]] = []
+        turn_state = {"i": 0}
+
+        def fake_chat(messages, **kw):
+            captured.append([dict(m) for m in messages])
+            turn_state["i"] += 1
+            if turn_state["i"] == 1:
+                return {"text": "", "tool_calls": [
+                    {"id": "c1", "name": "giant", "arguments": {}},
+                ], "status": "ok", "usage": {}}
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(
+            config=br.BrainConfig(
+                enforce_identity_lock=False,
+                tool_result_max_chars=0,
+            ),
+            chat_fn=fake_chat, memory=mem, skills=reg,
+        )
+        b.turn("hi")
+        tool_msg = next(m for m in captured[-1]
+                        if m.get("role") == "tool")
+        # Full payload flows through untouched
+        assert big_payload in tool_msg["content"]
+        assert "[tool output budget:" not in tool_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.2: per-skill max_result_size overrides BrainConfig default")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+
+        def mid(**_: Any) -> str:
+            return "q" * 3000  # 3000 chars
+
+        reg = sk.SkillRegistry()
+        reg.register(sk.Skill(
+            name="mid", description="",
+            invocation="python", callable=mid,
+            max_result_size=1000,   # per-skill, tighter than Brain default
+        ))
+        mem = mm.MemoryStore(path=pd / "m.db")
+        captured: list[list[dict[str, Any]]] = []
+        turn_state = {"i": 0}
+
+        def fake_chat(messages, **kw):
+            captured.append([dict(m) for m in messages])
+            turn_state["i"] += 1
+            if turn_state["i"] == 1:
+                return {"text": "", "tool_calls": [
+                    {"id": "c1", "name": "mid", "arguments": {}},
+                ], "status": "ok", "usage": {}}
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        # Brain default is 8000, but the skill's 1000 wins
+        b = br.Brain(
+            config=br.BrainConfig(enforce_identity_lock=False),
+            chat_fn=fake_chat, memory=mem, skills=reg,
+        )
+        b.turn("hi")
+        tool_msg = next(m for m in captured[-1]
+                        if m.get("role") == "tool")
+        # 3000-char result exceeds skill's 1000-char limit — budgeted
+        assert "[tool output budget:" in tool_msg["content"]
+        assert "> 1000 max" in tool_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
+
 @test("brain v0.7: L5 identity rows land in system prompt on every turn")
 def _():
     pd = _tmp_projects_dir()

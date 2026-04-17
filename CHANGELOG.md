@@ -2,6 +2,80 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.2] — 2026-04-17 — tool result budgeting + canonical memory-tiers doc
+
+Ships the first concrete v0.9.2 candidate from the Rohit Yadav Claude
+Code teardown triage: **tool-result budgeting**. Also adds a single
+canonical one-pager that kills the external-LLM tier-naming drift
+problem permanently.
+
+**Tool-result budgeting (`mnemosyne_skills.py` + `mnemosyne_brain.py`)**
+Defends against the "user runs `cat` on a 1 MB log file" production
+failure mode where a single tool result fills the context window with
+noise and the agent loses coherence. Claude Code ships a 45+ tool
+subsystem largely to prevent this; we now have the same defense in
+~90 lines.
+
+- New module-level `budget_tool_result(result, *, skill_name,
+  max_result_size, out_dir)` in `mnemosyne_skills.py`. Returns
+  `(maybe_replaced_result, budget_info)`. Small results pass through
+  unchanged (one `len()` call and nothing else). Oversized results
+  are persisted to `$PROJECTS_DIR/tool-outputs/<YYYY-MM-DD>/
+  <HHMMSSmmm>-<skill>-<uuid>.txt` and the returned value is a
+  structured preview string that tells the model the full size, the
+  path on disk, and shows the first N chars.
+- New `Skill.max_result_size: int | None` field. Per-skill override
+  for the Brain-wide default. `None` = fall through to
+  `BrainConfig.tool_result_max_chars`.
+- New `BrainConfig.tool_result_max_chars: int = 8000`. ~2000 tokens
+  on a typical tokenizer; the size where a single tool result starts
+  to dominate a turn's prompt budget on 32k-context models. Set to 0
+  to disable budgeting entirely (not recommended).
+- Brain intercepts tool results in the dispatch loop immediately
+  after `skill.invoke()` succeeds (errors skip budgeting; they're
+  small and callers need the full error text). Emits a
+  `tool_result_budget_hit` telemetry event with `original_size`,
+  `max_size`, `output_path`, `preview_size` so triage can cluster on
+  chronically-oversized tools.
+- Budgeter is non-fatal by design: disk-write failures fall through
+  to a preview-only budgeted string rather than crashing the agent
+  loop. Wrapped in a try/except so a pathological storage situation
+  can never take down a turn.
+
+**`docs/MEMORY_TIERS.md` (new — the canonical reference)**
+Single source of truth for the six tiers. Every other doc that
+describes the memory architecture now has this page to defer to.
+Contents: canonical table (L0 through L5), Reflection → Instinct
+loop description, decay-multiplier table, explicit "what this is
+NOT" section naming the specific mislabelings external LLMs have
+produced ("L4 = archival / L5 = meta-memory" does not exist in the
+code), and a runnable Python snippet to verify the code agrees with
+the doc. The page is intentionally dense so LLMs that summarize it
+have less room to drift.
+
+**Article refresh (`docs/articles/v0.8-launch-substack.md`)**
+Repositioned from v0.8 launch piece to v0.8-through-v0.9.2
+cumulative launch piece. Timeline bullets added for v0.9.0 (L0
+tier) and v0.9.2 (tool budgeting). "5-tier + Instinct overlay"
+language replaced with "6-tier with L0 Instinct." "v0.9 roadmap"
+language replaced with "v0.10 roadmap" (v0.9.x is live). Rohit
+article referenced explicitly as the half-match / half-roadmap lens.
+
+**Packaging**
+- `pyproject.toml` 0.9.1 → 0.9.2.
+- No new modules, no new console scripts, no schema changes.
+
+**Tests:** 282 → 288 green. 6 new:
+- budget_tool_result: small results pass through
+- budget_tool_result: large string budgeted + persisted
+- budget_tool_result: large dict JSON-encoded, then budgeted
+- brain v0.9.2: oversized tool result is budgeted in-context + persisted
+- brain v0.9.2: tool_result_max_chars=0 disables budgeting entirely
+- brain v0.9.2: per-skill max_result_size overrides BrainConfig default
+
+pyflakes clean. No behavior change for any existing skill that returns
+a result under 8000 stringified characters.
+
 ## [0.9.1] — 2026-04-17 — repo-rename sweep + doc consistency + Rohit-article triage
 
 No code changes. Pre-launch docs/branding consistency pass triggered by

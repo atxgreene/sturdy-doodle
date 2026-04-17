@@ -134,11 +134,13 @@ surfaces:
   parallel batches (up to 10), mutating ones serially. Our tool
   executor runs serially. Concrete, shippable improvement —
   candidate for v0.9.2 or v0.10.
-- **Tool result budgeting.** `maxResultSizeChars` per tool; results
-  exceeding the budget persist to disk and return a path + preview.
-  Defends against the "user runs `cat` on a 1 MB log file" failure
-  mode. Easy add; candidate for v0.9.2. Not currently covered by
-  our skill definitions.
+- ~~**Tool result budgeting.**~~ Shipped in v0.9.2.
+  `Skill.max_result_size` + `BrainConfig.tool_result_max_chars`.
+  Oversized results persist to
+  `$PROJECTS_DIR/tool-outputs/<date>/...` and the model sees a
+  preview + file reference. `tool_result_budget_hit` telemetry event
+  emits on every cap hit so triage can cluster chronically-oversized
+  tools.
 - **Four-strategy context compaction hierarchy** (microcompact /
   snip / auto summarization / context collapse). Our context
   management is the identity-lock + tier-based-injection block

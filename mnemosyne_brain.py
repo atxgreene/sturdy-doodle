@@ -169,6 +169,17 @@ class BrainConfig:
     # once your tool set is stable.
     tool_feedback_learning: bool = False
 
+    # v0.9.2 — tool-result budgeting. Caps the in-context size of any
+    # single tool result at this many characters (stringified). Results
+    # exceeding the cap are persisted to
+    # `$PROJECTS_DIR/tool-outputs/<date>/<ts>-<skill>-<uuid>.txt` and
+    # replaced in-context with a preview + file reference. Per-skill
+    # override: set `Skill.max_result_size` at registration time.
+    # Set to 0 to disable budgeting entirely (not recommended — this
+    # is the defense against the "user runs `cat` on a 1 MB log file"
+    # failure mode that fills the context with noise).
+    tool_result_max_chars: int = 8000
+
     # Goal stack injection: read $PROJECTS_DIR/goals.jsonl on first turn
     # and surface the top N open goals in the system prompt so the agent
     # knows what's in flight across sessions. Off by default.
@@ -491,6 +502,41 @@ class Brain:
                     except Exception as e:
                         tool_result = {"error": f"{type(e).__name__}: {e}"}
                         status = "error"
+
+                    # v0.9.2 — tool-result budgeting. Cap huge outputs
+                    # so they don't dominate the context window. Full
+                    # output persists to disk; model sees preview + ref.
+                    # Skip on errors (they're tiny anyway) and when
+                    # budgeting is disabled (tool_result_max_chars=0).
+                    if status == "ok" and self.config.tool_result_max_chars > 0:
+                        try:
+                            effective_max = (
+                                skill.max_result_size
+                                if getattr(skill, "max_result_size", None) is not None
+                                else self.config.tool_result_max_chars
+                            )
+                            out_dir = self._tool_output_dir()
+                            tool_result, budget_info = skills_mod.budget_tool_result(
+                                tool_result,
+                                skill_name=name,
+                                max_result_size=effective_max,
+                                out_dir=out_dir,
+                            )
+                            if budget_info is not None:
+                                self._log(
+                                    "tool_result_budget_hit",
+                                    tool=name,
+                                    original_size=budget_info["original_size"],
+                                    max_size=budget_info["max_size"],
+                                    output_path=budget_info["output_path"],
+                                    preview_size=budget_info["preview_size"],
+                                    parent_event_id=parent_evt,
+                                )
+                        except Exception:
+                            # Budgeting must never break a turn; fall
+                            # through with the raw result.
+                            pass
+
                     # Tool-feedback learning: on error, write an L1 hot
                     # memory so future routing sees the failure mode.
                     # Kept tiny — the memory becomes retrievable context
@@ -803,6 +849,19 @@ class Brain:
                 },
             )
         self._context_adapted = True
+
+    def _tool_output_dir(self) -> Path:
+        """Return the directory where oversized tool results are persisted
+        by the v0.9.2 budgeter. Lazily resolved off the projects dir."""
+        try:
+            from mnemosyne_config import default_projects_dir
+            base = default_projects_dir()
+        except Exception:
+            import os as _os
+            raw = _os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
+            base = (Path(raw).expanduser().resolve() if raw
+                    else Path.home() / "projects" / "mnemosyne")
+        return base / "tool-outputs"
 
     def _build_env_snapshot(self) -> str:
         """Call environment-snapshot for the first-turn preamble. Safe if missing."""
