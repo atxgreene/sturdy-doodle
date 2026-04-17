@@ -92,45 +92,93 @@ a delta.
 
 ## LOCOMO benchmark (full setup)
 
-LOCOMO is the standard public long-conversation memory recall
-benchmark (arxiv 2402.09727). Ten ~600-turn dialogues, four question
-types, LLM-as-judge scoring.
+LOCOMO is the standard public long-conversation memory-recall
+benchmark from Snap Research: ten ~600-turn dialogues, ~199
+human-annotated QA pairs per sample (1,990 total), five question
+categories (single-hop / multi-hop / temporal / open-domain /
+adversarial).
 
-This needs the full optional deps (`datasets` for loading, `openai`
-for the judge, `mem0ai` if you want a head-to-head):
+Repo: [snap-research/locomo](https://github.com/snap-research/locomo).
+Paper: arXiv 2402.17753.
+
+**We do not redistribute the dataset** (no license declared in the
+upstream repo). Download it yourself — one command:
 
 ```sh
-# 1. Set up the optional venv (keeps stdlib-only invariant intact)
-python3 -m venv bench/.venv
-bench/.venv/bin/pip install -r bench/requirements.txt
-
-# 2. Mnemosyne, retrieval-only baseline (no LLM)
-bench/.venv/bin/python bench/locomo.py \
-    --substrate mnemosyne \
-    --max-conversations 2 \
-    --out bench/results/mnemosyne-locomo-retrieval.json
-
-# 3. Mnemosyne, LM Studio grounded
-bench/.venv/bin/python bench/locomo.py \
-    --substrate mnemosyne \
-    --llm-grounded \
-    --provider lmstudio \
-    --model <your-lmstudio-model-id> \
-    --out bench/results/mnemosyne-locomo-lmstudio.json
-
-# 4. Mem0 head-to-head (requires OPENAI_API_KEY in env)
-bench/.venv/bin/python bench/locomo.py \
-    --substrate mem0 \
-    --max-conversations 2 \
-    --out bench/results/mem0-locomo.json
+mkdir -p bench/data
+curl -L https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json \
+    -o bench/data/locomo10.json
 ```
 
-The judge is `gpt-4o-mini` at `temperature=0` by default; override
-in `bench/locomo.py:llm_judge` if you want to pin a different
-snapshot.
+`bench/data/` is gitignored so the 2.8 MB JSON never accidentally
+gets committed.
+
+### Substring judge (fast, no API key, lower bound)
+
+The cheapest path: substring judge (case-insensitive substring /
+token match between expected and actual answer). Fast, no API, runs
+on the retrieval-only or LLM-grounded path.
+
+```sh
+# Retrieval-only smoke test (no LLM anywhere; measures substrate)
+python3 bench/locomo.py --substrate mnemosyne \
+    --max-samples 1 --max-questions-per-sample 20 \
+    --verbose --out bench/results/mnemo-retrieval-smoke.json
+
+# LM Studio-grounded smoke test (same subsample, model answers each Q)
+python3 bench/locomo.py --substrate mnemosyne \
+    --llm-grounded --provider lmstudio --model <your-model-id> \
+    --max-samples 1 --max-questions-per-sample 20 \
+    --verbose --out bench/results/mnemo-lmstudio-smoke.json
+
+# Full run: 10 samples × ~199 questions × model_turn_latency × 2
+# On a 7-8B q4_K_M model that's 1-3 hours. Use --verbose.
+python3 bench/locomo.py --substrate mnemosyne \
+    --llm-grounded --provider lmstudio --model <your-model-id> \
+    --verbose --out bench/results/mnemo-lmstudio-full.json
+```
+
+### LLM-as-judge (paid, more representative of LOCOMO numbers)
+
+Published LOCOMO numbers use GPT-4 family as the judge. Match their
+methodology with `--judge openai` (requires `OPENAI_API_KEY` +
+`pip install -r bench/requirements.txt`):
+
+```sh
+pip install -r bench/requirements.txt
+
+python3 bench/locomo.py --substrate mnemosyne \
+    --llm-grounded --provider lmstudio --model <your-model-id> \
+    --judge openai --judge-model gpt-4o-mini \
+    --verbose --out bench/results/mnemo-lmstudio-openai-judge.json
+```
+
+### Mem0 head-to-head
+
+Run the same dataset through Mem0 for a comparison table:
+
+```sh
+# Requires OPENAI_API_KEY in env (Mem0 uses it for extraction)
+python3 bench/locomo.py --substrate mem0 \
+    --max-samples 1 --max-questions-per-sample 20 \
+    --judge openai --verbose \
+    --out bench/results/mem0-locomo-smoke.json
+```
+
+### Category interpretation
+
+LOCOMO categories (integer 1-5 in the JSON; renamed by our runner):
+
+| Code | Our name | LOCOMO meaning |
+| :--: | :--- | :--- |
+| 1 | `single_hop` | Answer in one dialog turn |
+| 2 | `multi_hop` | Answer requires combining multiple turns |
+| 3 | `temporal` | Answer requires reasoning about time |
+| 4 | `open_domain` | Answer draws on external knowledge beyond the dialog |
+| 5 | `adversarial` | Answer is "I don't know" — question isn't in the dialog |
 
 Reports land in `bench/results/` (gitignored — don't commit raw
-conversation samples).
+conversation samples or outputs).
 
 ---
 
