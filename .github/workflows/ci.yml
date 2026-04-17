@@ -98,7 +98,7 @@ jobs:
           python3 -m venv /tmp/ci-venv
           /tmp/ci-venv/bin/pip install --quiet --upgrade pip
           /tmp/ci-venv/bin/pip install -e .
-      - name: Verify all 22 entry points land on $PATH
+      - name: Verify all 25 entry points land on $PATH
         run: |
           # Stable v0.2.x surface
           for cmd in mnemosyne-experiments mnemosyne-pipeline \

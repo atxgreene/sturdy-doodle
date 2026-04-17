@@ -1,6 +1,8 @@
 # Mnemosyne
 
-![hero](docs/images/hero-owl-banner.png)
+<!-- Drop hero-owl-banner.png into docs/images/ to display the launch banner.
+     See docs/images/README.md for asset slots and filenames. -->
+![Mnemosyne — A cognitive OS for local-first AI agents](docs/images/hero-owl-banner.png)
 
 **A cognitive OS for local-first agents. Stdlib only. One pip install away.**
 
@@ -8,7 +10,8 @@
 
 ## Architecture at a glance
 
-![architecture](docs/images/architecture-overview.png)
+<!-- Drop architecture-overview.png into docs/images/ for the full diagram. -->
+![Mnemosyne system architecture: Channels → Brain → Tools + 6-tier ICMS + Meta-Harness loop](docs/images/architecture-overview.png)
 
 Channels (REST/CLI/Telegram/Slack/Discord/Avatar UI) → Brain (context assembly + identity lock) → Tool Executor + 19-provider Model Backend. ICMS **6-tier memory** (L0 instinct / L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity) with the v0.9 **Reflection → Instinct loop** distilling L5+lower patterns down into L0 fast-path rows. Inner Dialogue (Planner/Critic/Doer/Evaluator), Dream Consolidation, Meta-Harness self-improvement loop. All data lives as plain SQLite + JSONL + Markdown — your knowledge survives without the framework.
 
@@ -34,7 +37,7 @@ provider, and treat the agent as a black box. Mnemosyne goes the other way.
 | **Stdlib-only core** | Zero runtime dependencies. `pip install mnemosyne-harness` pulls *nothing* from PyPI. The whole framework imports from Python's standard library. Auditable in an afternoon. |
 | **19 backends through one API** | Ollama, LM Studio, OpenAI, Anthropic, OpenRouter, Together, Fireworks, Groq, DeepSeek, Cerebras, Hyperbolic, Perplexity, Novita, Nous, Google, xAI, Mistral, Cohere, vLLM, TGI. One `Backend(provider="…", default_model="…")` call. |
 | **4-layer identity lock** | Whether the model is Qwen, Claude, or GPT-4, the agent identifies as Mnemosyne. Measured against a 40-prompt jailbreak suite (`scenarios/jailbreak.jsonl`). |
-| **Evolving avatar dashboard** | Browser dashboard at `/ui` whose SVG avatar visualizes 16 derived agent traits in real time. Every visual property maps to one observable number — no opaque "personality engine." |
+| **Evolving avatar dashboard** | Browser dashboard at `/ui` whose SVG avatar visualizes 17 derived agent traits in real time. Every visual property maps to one observable number — no opaque "personality engine." |
 | **Hermes-compatible trajectories** | Captured turns export to ShareGPT JSONL byte-for-byte matching NousResearch/hermes-agent. Drop into Unsloth or Axolotl for LoRA fine-tuning unchanged. |
 | **Meta-Harness loop closed end-to-end** | `triage → proposer → apply → measure`. The agent observes its own failures and proposes its own fixes — no external orchestrator. |
 | **Local-first storage** | SQLite + FTS5 memory, JSONL events, markdown skills. Your `~/projects/mnemosyne/` is a directory you own. If Mnemosyne disappeared tomorrow, your knowledge survives as plain files. |
@@ -80,7 +83,7 @@ The brain handles memory retrieval, tool dispatch, identity enforcement, inner d
 - [`docs/ROADMAP.md`](./docs/ROADMAP.md) — what's shipped vs experimental vs research vs aspirational. Honest.
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model, audit findings, defenses, hardening guide.
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — system design, four-layer stack, DeltaNet inflection point, why-this-over-Langfuse.
-- [`docs/UI.md`](./docs/UI.md) — dashboard visual contract and avatar's 16 derived traits.
+- [`docs/UI.md`](./docs/UI.md) — dashboard visual contract and avatar's 17 derived traits.
 - [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md) — methodology + instrumentation-overhead reference numbers.
 - [`docs/LOCAL_MODELS.md`](./docs/LOCAL_MODELS.md) — context-window math + model choice guide for Ollama.
 - [`docs/TRAINING.md`](./docs/TRAINING.md) — fine-tune a LoRA adapter from your captured conversations.
