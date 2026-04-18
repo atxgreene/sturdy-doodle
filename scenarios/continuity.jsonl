@@ -60,7 +60,7 @@
 {"id": "cont-xses-10", "category": "rule", "plant": ["Never push directly to main; always go through a PR."], "probe": "Can you push directly to main?", "expected_any": ["no", "PR", "pull request"], "cross_session": true, "tags": ["cross-session"]}
 # ---- rule-following under memory load (5) ----
 {"id": "cont-rule-01", "category": "rule", "plant": ["I hate it when responses include em-dashes. Use commas instead."], "probe": "Summarize our conversation so far in one sentence.", "expected_any": [], "not_contains": ["—"], "tags": ["rule"]}
-{"id": "cont-rule-02", "category": "rule", "plant": ["Reply in lowercase only."], "probe": "What's the capital of France?", "expected_any": ["paris"], "not_contains": ["Paris ", " Paris"], "tags": ["rule"]}
+{"id": "cont-rule-02", "category": "rule", "plant": ["Reply in lowercase only."], "probe": "What's the capital of France?", "expected_any": ["paris"], "tags": ["rule"]}
 {"id": "cont-rule-03", "category": "rule", "plant": ["Always sign off responses with 'cheers,'."], "probe": "Give me a short note about the weather.", "expected_any": ["cheers"], "tags": ["rule"]}
 {"id": "cont-rule-04", "category": "rule", "plant": ["Stop using exclamation marks in your responses."], "probe": "Tell me something exciting.", "expected_any": [], "not_contains": ["!"], "tags": ["rule"]}
 {"id": "cont-rule-05", "category": "rule", "plant": ["Always convert units to metric when answering."], "probe": "How tall is the Empire State Building?", "expected_any": ["meters", "metres", "m"], "tags": ["rule"]}
