@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.9.4"
+version = "0.9.7"
 description = "Local-first LLM agent framework: ICMS 6-tier memory with Reflection → Instinct loop, 19 model backends, 4-layer identity lock, evolving avatar dashboard. Stdlib only."
 readme = "README.md"
 license = { file = "LICENSE" }

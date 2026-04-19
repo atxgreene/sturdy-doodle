@@ -85,6 +85,42 @@ import mnemosyne_inner as inner_mod
 ChatFn = Callable[..., dict[str, Any]]
 
 
+# ---- rule-intent detection (v0.9.6) ----------------------------------------
+
+# Pattern matches imperative behavioral constraints at the start of a
+# user message: "stop/never/always/only/don't/please always/from now on".
+# Deliberately conservative — a false negative (missing a rule) is
+# recoverable; a false positive (tagging a non-rule) permanently
+# promotes random content into every system prompt.
+_RULE_INTENT_PATTERN = __import__("re").compile(
+    r"""^\s*
+        (?:please\s+)?
+        (?:
+            stop\b[^,.!?\n]{0,50}\b(?:using|saying|writing|including|doing|adding|putting|sending)
+          | (?:never|don['’]?t|do\s+not)\b
+          | (?:always|every\s+time|from\s+now\s+on|whenever)\b
+          | only\s+(?:use|respond|answer|write|reply)\b
+          | (?:reply|respond|answer|write)\s+(?:in|with|using)\b
+        )
+    """,
+    __import__("re").IGNORECASE | __import__("re").VERBOSE,
+)
+
+
+def _looks_like_rule(text: str) -> bool:
+    """Return True when the user message reads as a behavioral
+    constraint the agent should obey on every subsequent turn.
+
+    Matches imperative openers like 'stop using', 'never', 'always',
+    'only reply in', 'from now on'. Conservative by design — we'd
+    rather miss a rule than treat a casual sentence as one (false
+    positives pollute every future system prompt).
+    """
+    if not text or not text.strip():
+        return False
+    return bool(_RULE_INTENT_PATTERN.match(text))
+
+
 # ---- optional integrations --------------------------------------------------
 
 def _try_import_consciousness() -> Any | None:
@@ -376,6 +412,17 @@ class Brain:
         if l5_block:
             system_parts.append(l5_block)
 
+        # v0.9.6 strict rules — user-asserted behavioral constraints
+        # (kind='rule' memories). Injected AFTER identity but BEFORE
+        # instinct because rules are harder-than-habits: identity says
+        # what the agent IS, rules say what it MUST or MUST NOT do,
+        # instinct says what it tends to do. Uses a STRICT RULES
+        # preamble so the model reads them as compliance requirements,
+        # not preferences.
+        rules_block = self._build_rules_block()
+        if rules_block:
+            system_parts.append(rules_block)
+
         # v0.8 user-instinct overlay — distilled user-pattern signals
         # from mnemosyne_instinct.distill(). Injected every turn so
         # learned preferences (terse vs verbose, tool affinities, etc.)
@@ -609,6 +656,24 @@ class Brain:
                 tier=mm.L2_WARM,
             )
             self._total_memory_writes += 1
+
+            # 5a. Rule-intent detection (v0.9.6). When the user issues
+            # a behavioral constraint ("stop using exclamation marks",
+            # "never push directly to main", "always sign off with
+            # 'cheers'"), persist it as a high-priority `rule` memory
+            # so `_build_rules_block()` can inject it into every future
+            # system prompt. Kept in addition to the `turn` row above
+            # so normal retrieval still surfaces the conversation
+            # context; the `rule` row is the strict-rules fast path.
+            if _looks_like_rule(user_message):
+                self.memory.write(
+                    content=user_message.strip(),
+                    source="conversation",
+                    kind="rule",
+                    tier=mm.L2_WARM,
+                    metadata={"detected_by": "rule_intent_regex"},
+                )
+                self._total_memory_writes += 1
 
         # 5b. Training capture — full verbatim turn for mnemosyne_train.py
         # to reconstruct Hermes-compatible ShareGPT trajectories later.
@@ -870,6 +935,41 @@ class Brain:
             return es.format_markdown(es.build_snapshot())
         except Exception:
             return ""
+
+    def _build_rules_block(self, *, limit: int = 20) -> str:
+        """Pull user-asserted rules (kind='rule' memories) and inject
+        them into the system prompt as STRICT compliance requirements.
+
+        Rules are harder-than-instinct: when the user says "stop using
+        exclamation marks," that's a MUST, not a preference. This
+        block renders them with imperative framing so the model reads
+        them as hard constraints rather than soft style guidance.
+
+        Populated automatically by `_looks_like_rule()` on write when
+        `Brain.turn()` detects an imperative user message. Callers can
+        also write rules directly with `kind='rule'` for explicit
+        control. Silent no-op when no rules exist.
+        """
+        try:
+            with self.memory._lock:  # noqa: SLF001
+                rows = self.memory._conn.execute(  # noqa: SLF001
+                    "SELECT content FROM memories "
+                    "WHERE kind = 'rule' "
+                    "ORDER BY last_accessed_utc DESC NULLS LAST, "
+                    "         strength DESC, created_utc DESC "
+                    "LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        except Exception:
+            return ""
+        if not rows:
+            return ""
+        lines = [f"- {r['content']}" for r in rows]
+        return (
+            "## STRICT RULES — you MUST obey every item below on every "
+            "response. Violating a rule makes the response invalid.\n\n"
+            + "\n".join(lines)
+        )
 
     def _build_instinct_block(self, *, limit: int = 20) -> str:
         """Pull user-instinct rows (kind=user_instinct, populated by

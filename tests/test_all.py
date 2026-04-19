@@ -4917,6 +4917,151 @@ def _():
         shutil.rmtree(pd)
 
 
+# =============================================================================
+#  v0.9.6: rule-intent detection + strict-rules block
+# =============================================================================
+
+@test("brain v0.9.6: _looks_like_rule detects 'stop using' / 'never' / 'always'")
+def _():
+    from mnemosyne_brain import _looks_like_rule
+    assert _looks_like_rule("Stop using exclamation marks.")
+    assert _looks_like_rule("stop including emojis in your replies")
+    assert _looks_like_rule("Never push directly to main.")
+    assert _looks_like_rule("don't use contractions")
+    assert _looks_like_rule("do not reply in markdown")
+    assert _looks_like_rule("Always sign off with 'cheers,'.")
+    assert _looks_like_rule("from now on address me as Dr. Lee")
+    assert _looks_like_rule("Only reply in lowercase.")
+    assert _looks_like_rule("Reply in metric units.")
+    assert _looks_like_rule("Please always convert units to metric.")
+    # Negatives — prose containing these words but not imperative rules
+    assert not _looks_like_rule("My favorite color is teal.")
+    assert not _looks_like_rule("The meeting is always at 3 PM.")
+    assert not _looks_like_rule("")
+    assert not _looks_like_rule("   ")
+
+
+@test("brain v0.9.6: rule-intent user message writes a kind='rule' memory")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        mem = mm.MemoryStore(path=pd / "m.db")
+
+        def fake_chat(messages, **kw):
+            return {"text": "got it", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=False),
+                     chat_fn=fake_chat, memory=mem)
+        b.turn("Stop using exclamation marks in your responses.")
+        rows = mem._conn.execute(
+            "SELECT content, kind FROM memories WHERE kind = 'rule'"
+        ).fetchall()
+        assert len(rows) == 1, rows
+        assert "exclamation" in rows[0]["content"].lower()
+
+        # Non-rule message should NOT create a rule row
+        b.turn("My favorite color is teal.")
+        rows_after = mem._conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE kind = 'rule'"
+        ).fetchone()[0]
+        assert rows_after == 1, f"expected 1 rule row, got {rows_after}"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.6: _build_rules_block injects STRICT RULES block when rules exist")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        mem = mm.MemoryStore(path=pd / "m.db")
+        mem.write("Stop using exclamation marks.", kind="rule", tier=mm.L2_WARM)
+        mem.write("Always sign off with 'cheers,'.", kind="rule",
+                  tier=mm.L2_WARM)
+
+        captured: dict[str, Any] = {}
+
+        def fake_chat(messages, **kw):
+            captured["messages"] = messages
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=False),
+                     chat_fn=fake_chat, memory=mem)
+        b.turn("say something")
+        sys_msg = next(m for m in captured["messages"]
+                       if m["role"] == "system")
+        assert "STRICT RULES" in sys_msg["content"]
+        assert "exclamation" in sys_msg["content"].lower()
+        assert "cheers" in sys_msg["content"].lower()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.6: no rules → no STRICT RULES block (silent no-op)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        mem = mm.MemoryStore(path=pd / "m.db")
+        mem.write("My dog's name is Miso.", kind="fact", tier=mm.L2_WARM)
+
+        captured: dict[str, Any] = {}
+
+        def fake_chat(messages, **kw):
+            captured["messages"] = messages
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=False),
+                     chat_fn=fake_chat, memory=mem)
+        b.turn("hi")
+        sys_msg = next(m for m in captured["messages"]
+                       if m["role"] == "system")
+        assert "STRICT RULES" not in sys_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain v0.9.6: rules block injected BEFORE instinct block in system prompt")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        mem = mm.MemoryStore(path=pd / "m.db")
+        # Seed both rules and instincts
+        mem.write("Stop using exclamation marks.", kind="rule",
+                  tier=mm.L2_WARM)
+        mem.write(
+            "[INSTINCT x 3] terminal, dark, mode: user uses dark mode",
+            kind="user_instinct", tier=mm.L0_INSTINCT,
+        )
+        captured: dict[str, Any] = {}
+
+        def fake_chat(messages, **kw):
+            captured["messages"] = messages
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=False),
+                     chat_fn=fake_chat, memory=mem)
+        b.turn("hello")
+        sys_content = next(m for m in captured["messages"]
+                           if m["role"] == "system")["content"]
+        # Rules must come before instincts — "STRICT RULES" appears
+        # earlier than "Learned user instincts" in the rendered system
+        # prompt. Order matters: rules override habits.
+        rules_idx = sys_content.find("STRICT RULES")
+        instinct_idx = sys_content.find("Learned user instincts")
+        assert rules_idx >= 0 and instinct_idx >= 0, sys_content[:500]
+        assert rules_idx < instinct_idx, (
+            f"rules_idx={rules_idx} instinct_idx={instinct_idx}")
+    finally:
+        shutil.rmtree(pd)
+
+
 @test("brain v0.8: user_instinct rows land in system prompt on every turn")
 def _():
     pd = _tmp_projects_dir()

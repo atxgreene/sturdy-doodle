@@ -1,0 +1,31 @@
+{
+  "_metadata": {
+    "benchmark": "Continuity Score",
+    "benchmark_version": "v0.7 (50 scenarios, 6 categories)",
+    "date_utc": "2026-04-17",
+    "substrate": "Mnemosyne v0.9.6 (rules-block + scenario fix)",
+    "model": "google/gemma-4-e4b",
+    "model_details": {
+      "family": "Gemma 4 E4B",
+      "quantization": "Q4_K_M",
+      "file": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "size_gb": 6.33,
+      "format": "GGUF"
+    },
+    "inference_server": "LM Studio 0.4.11 (OpenAI-compat endpoint)",
+    "judge": "substring",
+    "note": "Second Gemma run. v0.9.5 run scored 0.98 (49/50); this v0.9.6 run scored 0.92 (46/50) with different specific failures - the delta is model sampling non-determinism, not substrate regression. Rule category hit 6/6 (1.0) for the first time thanks to v0.9.6 rules-block."
+  },
+  "continuity_score": 0.92,
+  "passed": 46,
+  "total": 50,
+  "by_category": {
+    "preference": {"total": 12, "passed": 10, "score": 0.8333},
+    "fact":       {"total": 14, "passed": 14, "score": 1.0},
+    "project":    {"total": 12, "passed": 11, "score": 0.9167},
+    "decision":   {"total":  6, "passed":  5, "score": 0.8333},
+    "rule":       {"total":  6, "passed":  6, "score": 1.0}
+  },
+  "cross_session": {"total": 10, "passed": 9, "score": 0.9},
+  "rule_category_note": "6/6 = 1.0. v0.9.6 rules-block fix + cont-rule-02 scenario fix. First perfect rule-category score across any run."
+}

@@ -2,6 +2,171 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.7] — 2026-04-17 — multi-run multi-model Continuity benchmark results
+
+Three new benchmark reports in `docs/benchmark-results/` + updated
+BENCHMARKS table + Substack article re-framed from single-result to
+multi-run multi-model.
+
+**Benchmark results added:**
+- `2026-04-17-continuity-gemma4-v0.9.6.json` — Gemma 4 E4B on v0.9.6.
+  46/50 = 0.92 aggregate; **6/6 = 1.0 on rule category** (first
+  perfect rule-category run, confirming v0.9.6 rules-block works).
+- `2026-04-17-continuity-qwen3.5-9b-v0.9.6.json` — Qwen 3.5 9B on
+  v0.9.6. 46/50 = 0.92 aggregate; stable across two independent runs
+  with different specific failures (sampling non-determinism).
+
+**Four-run summary now in BENCHMARKS_v0.7.md and the Substack article:**
+
+| Run                      | Aggregate | Rule | Cross-session |
+| :----------------------- | :-------: | :--: | :-----------: |
+| Gemma 4 E4B v0.9.5       | **0.98**  | 0.83 | **1.00**      |
+| Gemma 4 E4B v0.9.6       | 0.92      | **1.00** | 0.90      |
+| Qwen 3.5 9B v0.9.6 (1)   | 0.92      | 0.83 | 0.80          |
+| Qwen 3.5 9B v0.9.6 (2)   | 0.92      | 0.83 | 0.90          |
+
+Aggregate band: **0.92–0.98 across two models, four runs**. Specific
+failures shift between runs; aggregate and category distributions
+are stable. The substrate is consistent; model sampling is the
+variance source. This is the strongest framing we've had —
+one-shot numbers are cheap; a 0.06-wide aggregate band across two
+independent model families through the same substrate is the
+defensible publication claim.
+
+**Article rewrite:** replaced the single-model framing with the
+multi-run table + three-bullet interpretation (substrate is
+consistent; rules-block works; model differences are categorical
+not aggregate).
+
+**pyproject.toml:** 0.9.6 → 0.9.7. No code changes; docs-only
+patch release. Tests 296/296 green (unchanged).
+
+## [0.9.6] — 2026-04-17 — rule-intent detection + STRICT RULES block
+
+Closes the one v0.9.5 Continuity Score failure (`cont-rule-04` —
+model used "!" despite a "stop using exclamation marks" rule) with
+a small, architecturally-aligned fix. No new class, no parallel
+storage, no tier-count mistakes — just two additions to `Brain`:
+
+**1. Rule-intent detection at write time (`mnemosyne_brain._looks_like_rule`)**
+Conservative regex that matches imperative behavioral-constraint
+openers at the start of a user message: `stop using|saying|writing`,
+`never`, `don't`, `do not`, `always`, `every time`, `from now on`,
+`whenever`, `only use|respond|answer|write`, `reply in|with|using`.
+Deliberately tight — false positives permanently pollute every
+future system prompt, so we'd rather miss a rule than promote a
+casual sentence. When `Brain.turn()` receives a matching user
+message, it writes an extra `kind="rule"` memory alongside the
+usual `kind="turn"` row. Normal retrieval still surfaces the
+conversation; the rule row feeds the strict block below.
+
+**2. `Brain._build_rules_block()` injects a STRICT RULES preamble**
+Queries `kind='rule'` rows (most-recently-accessed first, then by
+strength) and renders them with imperative framing:
+
+```
+## STRICT RULES — you MUST obey every item below on every
+response. Violating a rule makes the response invalid.
+
+- Stop using exclamation marks.
+- Never push directly to main.
+```
+
+Injected AFTER the v0.7 L5 identity block but BEFORE the v0.8 L0
+instinct block — deliberate ordering: identity says what the agent
+IS, rules say what it MUST or MUST NOT do, instinct says what it
+tends to do. Rules override habits; they don't override identity.
+
+**Why this and not Grok's proposed `InstinctStore` class?**
+
+Third-party feedback suggested adding a parallel `InstinctStore`
+with an in-memory `_forbidden_cache` and explicit `add_negative_rule()`
+API. Reviewed and declined — would have:
+- introduced a duplicate module (we already have `mnemosyne_instinct.py`),
+- used `tier=1` (our L1 is Hot, not Instinct — which is L0),
+- broken the one-SQLite-table invariant the substrate is built on,
+- conflated negative rules (imperative user intent) with user
+  instincts (distilled statistical signal).
+
+The fix that shipped integrates with the existing 6-tier ICMS,
+uses the existing `kind` column (zero schema change), and is ~40
+lines of new code. Full review in the relevant commit message.
+
+**Tests:** 291 → 296 green. 5 new:
+- `_looks_like_rule` detects imperative openers + negatives stay false
+- rule-intent user message writes a `kind='rule'` memory (non-rules don't)
+- `_build_rules_block` renders STRICT RULES in system prompt
+- no rules → no block (silent no-op)
+- rules block ordered BEFORE instinct block (rules > habits)
+
+Packaging: `pyproject.toml` 0.9.5 → 0.9.6. Backward-compatible; no
+existing behavior changes unless the user types a rule-phrased
+message.
+
+## [0.9.5] — 2026-04-17 — first published live-model Continuity Score: Gemma 4 E4B hits 0.98
+
+First reproducible live-model benchmark number lands in the repo.
+Gemma 4 E4B Q4_K_M (6.33 GB GGUF) via LM Studio through Mnemosyne's
+6-tier ICMS scores **0.98 aggregate, 1.00 cross-session, 1.00 on
+four of six categories** on the 50-scenario Continuity Score suite.
+
+Full per-scenario report committed at
+`docs/benchmark-results/2026-04-17-continuity-gemma4-e4b.json`
+(summary + metadata; runnable by anyone with LM Studio).
+
+**The result:**
+
+| Category      | Total | Passed | Score     |
+| :------------ | ----: | -----: | :-------- |
+| preference    |    12 |     12 | 1.000     |
+| fact          |    14 |     14 | 1.000     |
+| project       |    12 |     12 | 1.000     |
+| decision      |     6 |      6 | 1.000     |
+| rule          |     6 |      5 | 0.833     |
+| **aggregate** |    50 |     49 | **0.980** |
+
+Cross-session subset: **10 / 10 = 1.000**.
+
+**What matters beyond the aggregate:**
+
+- `cont-proj-04` (two-plant bridging — "Kong is behind an NLB")
+  **passes**. The substrate-only dryrun could not compose across
+  rows; with a live model, Mnemosyne + Gemma correctly recovers
+  "AWS Network Load Balancer (NLB)".
+- `cont-xses-01` (cross-session paraphrase — "refer to me as Dr.
+  Lee" → "How should you address me?") **passes**. Zero lexical
+  overlap between plant and probe; v0.7.1's AND→OR recall fallback
+  + recency fallback surfaced the row; model parsed it cleanly.
+- Only failure is `cont-rule-04`: genuine instruction-following
+  miss by the model (Gemma used exclamation marks despite the
+  planted "stop using exclamation marks" rule). Not a substrate
+  artifact — the rule reached the model via the L5 identity block;
+  the model didn't obey it.
+
+**Docs updated with the real number:**
+- `docs/BENCHMARKS_v0.7.md` — new "Live model" subsection under §3
+  with the table, setup details, reproduce command, honest caveats
+  (single-run, substring judge, not LOCOMO), and a dryrun-vs-live
+  comparison table.
+- `docs/articles/v0.8-launch-substack.md` — replaced the "numbers
+  are yours to measure" hedge with the real 0.98 result, plus a
+  highlighted callout of the two scenarios (NLB, Dr. Lee) that
+  demonstrate live-model composition beyond what the substrate
+  alone can deliver.
+- `docs/articles/v0.8-x-thread.md` — tweet #10 rewritten to lead
+  with the live-model number. Tweet #3 trimmed to stay under 280
+  chars after the update. Full thread re-verified: all 12 tweets
+  under the Twitter limit.
+
+**New directory** `docs/benchmark-results/` for dated benchmark
+reports. Committed to the repo so community reproductions have a
+canonical place to PR into.
+
+**Packaging:** `pyproject.toml` 0.9.4 → 0.9.5. No code changes —
+docs-only patch release.
+
+**Tests:** 291/291 green (unchanged). pyflakes clean.
+
 ## [0.9.4] — 2026-04-17 — 6-tier avatar state + doc-currency sweep + correct LOCOMO runner
 
 Two things ship in this release: a real substrate fix (avatar

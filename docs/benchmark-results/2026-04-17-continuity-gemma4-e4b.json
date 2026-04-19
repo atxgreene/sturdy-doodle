@@ -1,0 +1,53 @@
+{
+  "_metadata": {
+    "benchmark": "Continuity Score",
+    "benchmark_version": "v0.7 (50 scenarios, 6 categories)",
+    "date_utc": "2026-04-17",
+    "substrate": "Mnemosyne v0.9.4 @ commit 88c7c16 (branch claude/setup-mnemosyne-consciousness-NZqQE)",
+    "model": "google/gemma-4-e4b",
+    "model_details": {
+      "family": "Gemma 4 E4B",
+      "quantization": "Q4_K_M",
+      "file": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "size_gb": 6.33,
+      "format": "GGUF"
+    },
+    "inference_server": "LM Studio 0.4.11 (OpenAI-compat endpoint)",
+    "judge": "substring (case-insensitive token/phrase match against expected_any)",
+    "reproduce_command": [
+      "set MNEMOSYNE_LMSTUDIO_URL=http://your-lmstudio-host:PORT/v1/chat/completions",
+      "python mnemosyne_continuity.py run",
+      "    --scenarios scenarios/continuity.jsonl",
+      "    --provider lmstudio --model \"google/gemma-4-e4b\"",
+      "    --verbose --out continuity-gemma4-full.json"
+    ],
+    "failing_scenarios": [
+      {
+        "id": "cont-rule-04",
+        "diagnosis": "Genuine instruction-following miss by the model. Plant was 'Stop using exclamation marks in your responses'; judge rule is `not_contains: [\"!\"]`; model's response included multiple `!`. Substrate delivered the rule correctly; model didn't obey. Not a substrate or judge artifact."
+      }
+    ],
+    "notable_successes": [
+      {
+        "id": "cont-proj-04",
+        "why": "Two-plant bridging scenario. Plant A: 'Our API gateway is Kong'. Plant B: 'Kong is behind an NLB on AWS'. Probe: 'What load balancer fronts our API gateway?' Substrate-only dryrun failed this; with a live model, Mnemosyne + Gemma correctly answered 'AWS Network Load Balancer (NLB)'."
+      },
+      {
+        "id": "cont-xses-01",
+        "why": "Cross-session paraphrase with zero lexical overlap. Plant: 'refer to me as Dr. Lee; I'm doctoral'. Probe: 'How should you address me?' v0.7.1 AND->OR recall fallback + recency fallback surfaced the row; model parsed it cleanly: 'Based on your previous instruction, I should address you as Dr. Lee.'"
+      }
+    ]
+  },
+  "continuity_score": 0.98,
+  "passed": 49,
+  "total": 50,
+  "by_category": {
+    "preference": {"total": 12, "passed": 12, "score": 1.0},
+    "fact":       {"total": 14, "passed": 14, "score": 1.0},
+    "project":    {"total": 12, "passed": 12, "score": 1.0},
+    "decision":   {"total":  6, "passed":  6, "score": 1.0},
+    "rule":       {"total":  6, "passed":  5, "score": 0.8333}
+  },
+  "cross_session": {"total": 10, "passed": 10, "score": 1.0},
+  "_note": "Per-scenario results omitted here for brevity; the full runner output (all 50 response_preview fields) is preserved locally by the user. Ping the maintainer if you need it for audit. The summary above is stable across re-runs modulo model non-determinism; the one rule failure (cont-rule-04) may pass on some re-runs depending on Gemma's sampling."
+}
