@@ -9,42 +9,67 @@ main but the behavior can regress without a loud signal), or
 The yardstick is "could a stranger reproduce this with `git clone && pip
 install -e . && ./demo.sh` on a fresh laptop?" If yes, it's verifiable.
 
+Current release: **v0.9.7** (`mnemosyne-harness`, Beta). The cognitive-OS
+checklist is 5/5 ✓ (v0.7.0); the 12-component harness audit is 9 ✓ + 3
+partial (v0.8.0); the Reflection → Instinct loop shipped in v0.9.
+
 ---
 
 ## Shipped and verifiable
 
-| Area | Module(s) | Test coverage |
+| Area | Module(s) | Coverage |
 |---|---|---|
-| Telemetry (run + event model, secret redaction, FTS-friendly JSONL) | `harness_telemetry` | 15+ tests, integration via `test-harness.sh` |
-| Parameter sweeps + Pareto analysis | `harness_sweep`, `mnemosyne_experiments` | 10+ tests, sweep_demo |
-| Scenario runner with expectations DSL | `scenario_runner`, `scenarios.example.jsonl` | 8+ tests |
+| Telemetry (run + event model, secret redaction, FTS-friendly JSONL) | `harness_telemetry` | unit tests + `test-harness.sh` |
+| Parameter sweeps + Pareto analysis | `harness_sweep`, `mnemosyne_experiments` | unit tests, `sweep_demo` |
+| Scenario runner with expectations DSL | `scenario_runner` | unit tests |
 | Environment snapshot (first-turn context) | `environment_snapshot` | integration test |
-| SQLite+FTS5 memory with L1/L2/L3 tiers | `mnemosyne_memory` | 12+ tests |
-| Model backend (19 providers, stdlib-only) | `mnemosyne_models` | 8+ tests (mocked HTTP) |
-| Skill registry (agentskills.io-compatible) | `mnemosyne_skills` | 10+ tests |
-| 4-layer identity lock + audit mode | `mnemosyne_identity` | 15+ tests, demo rewrites "I am Claude" → "I am Mnemosyne" |
-| Brain routing orchestrator | `mnemosyne_brain` | 12+ tests, mocked chat_fn |
-| Local-model context adaptation | `mnemosyne_brain._maybe_adapt_to_context` | 3 tests |
-| Triage / clustering + severity scoring | `mnemosyne_triage` | 8+ tests |
-| **Meta-Harness proposer (rule-based v1)** | `mnemosyne_proposer` | 4 tests |
-| **Apply agent (closes the loop)** | `mnemosyne_apply` | 4 tests |
-| **Dream consolidation (stdlib + optional LLM)** | `mnemosyne_dreams` | 4 tests |
-| **Multi-persona inner dialogue (Planner / Critic / Doer / Evaluator)** | `mnemosyne_inner` | 6 tests + 3 brain-integration tests |
-| **Goal stack (persistent TODO across sessions)** | `mnemosyne_goals` | 3 tests |
-| **Streaming chat API** | `mnemosyne_models.chat(stream=True)` | parser bits covered; live stream requires running model |
-| **Rate limiter (token-bucket, per-backend)** | `mnemosyne_models.RateLimiter` | 2 tests |
-| **Cost accounting (`mnemosyne-experiments cost`)** | `mnemosyne_experiments` + `mnemosyne_models.cost_for` | 4 tests |
-| **Scenario auto-generator** | `mnemosyne_scengen` | 2 tests |
-| **Embeddings (hashed-BOW fallback + optional sentence-transformers)** | `mnemosyne_embeddings` | 3 tests |
-| **MCP bridge (both directions)** | `mnemosyne_mcp` | protocol-level test with piped stdio |
-| **Tool-feedback learning (L1 failure notes)** | `mnemosyne_brain` | 1 test |
-| **Long-running daemon** | `mnemosyne_serve` | smoke-tested via HTTP; runs dreams/triage/proposer on cron |
-| **Jailbreak scenario suite (40 prompts)** | `scenarios/jailbreak.jsonl` | run with `mnemosyne-pipeline` on your backend |
-| 14-command CLI entry point (via `pip install -e .`) | `pyproject.toml` | CI install-smoke |
-| 6-phase GitHub Actions CI | `.github/workflows/ci.yml` | runs on every push |
+| **6-tier ICMS memory (L0–L5)** with ACT-R decay + Hebbian strength | `mnemosyne_memory` | unit tests |
+| **L3 → L4 pattern compaction + audit** | `mnemosyne_compactor` | unit tests |
+| **Reflection → Instinct loop (L0 fast-path distillation)** | `mnemosyne_instinct` | unit tests; brain injects L0 rows each turn |
+| **Continuity Score benchmark (50 scenarios, 6 categories)** | `mnemosyne_continuity` | substrate dryrun 0.96 agg / 1.00 cross-session (v0.7.1) |
+| Model backend (19 providers, stdlib-only, streaming) | `mnemosyne_models` | unit tests (mocked HTTP) |
+| Text-embedded tool-call parsers (Hermes/Qwen/Mistral/Llama-3) | `mnemosyne_tool_parsers` | unit tests |
+| Skill registry (agentskills.io-compatible) + builtin library | `mnemosyne_skills`, `mnemosyne_skills_builtin` | unit tests |
+| 4-layer identity lock + audit mode | `mnemosyne_identity` | unit tests; 6/6 canonical slips rewritten |
+| Brain routing orchestrator + local-model context adaptation | `mnemosyne_brain` | unit tests, mocked `chat_fn` |
+| Triage / clustering + severity scoring | `mnemosyne_triage` | unit tests |
+| **Meta-Harness proposer (rule-based)** | `mnemosyne_proposer` | unit tests |
+| **Apply agent — closes the loop (execute + measure)** | `mnemosyne_apply` | unit tests |
+| **Dream consolidation (stdlib + optional LLM summarizer)** | `mnemosyne_dreams` | unit tests; ~200 ms / 500 L3 memories |
+| **Multi-persona inner dialogue (Planner / Critic / Doer / Evaluator)** | `mnemosyne_inner` | unit + brain-integration tests |
+| **Goal stack (persistent TODO across sessions)** | `mnemosyne_goals` | unit tests |
+| **Self-calibration / predictions** | `mnemosyne_predictions` | unit tests |
+| **Routing-layer audit (Resolvers)** | `mnemosyne_resolver` | unit tests |
+| **User-editable permission model + harness adapter** | `mnemosyne_permissions`, `mnemosyne_adapter_claude_code` | unit tests |
+| Embeddings (hashed-BOW fallback + optional sentence-transformers) | `mnemosyne_embeddings` | unit tests |
+| MCP bridge (both directions) | `mnemosyne_mcp` | protocol-level test (piped stdio) |
+| Scenario auto-generator | `mnemosyne_scengen` | unit tests |
+| Cost accounting (`mnemosyne-experiments cost`) | `mnemosyne_experiments` + `mnemosyne_models.cost_for` | unit tests |
+| **Training bridge (ShareGPT export → Unsloth LoRA → deploy → A/B eval)** | `mnemosyne_train` | export/compress/deploy/eval covered; training needs the `[train]` extra |
+| **Synthetic-data pipeline (parallel trajectory runner + prompt gen)** | `mnemosyne_batch`, `mnemosyne_datagen` | unit tests |
+| **Avatar dashboard (29 derived traits) + static UI** | `mnemosyne_avatar`, `mnemosyne_ui` | derived-state tests; served by `mnemosyne-serve` |
+| Long-running daemon (dream / triage / proposer crons) | `mnemosyne_serve` | HTTP smoke test |
+| Jailbreak scenario suite (40 prompts) | `scenarios/jailbreak.jsonl` | run with `mnemosyne-pipeline` on your backend |
+| **Hermes memory provider — runtime-validated** | `integrations/hermes/` | 8/8 checks on live Hermes v0.16.0 (see `docs/HERMES.md`) |
+| 25-command CLI (via `pip install -e .`) | `pyproject.toml` `[project.scripts]` | CI install-smoke |
+| GitHub Actions CI | `.github/workflows/ci.yml` | runs on every push |
 
-Full test count: **145 unit tests** + shellcheck + pyflakes + install-smoke
-+ triage-demo + end-to-end `demo.sh` (17 sections).
+Run `python3 tests/test_all.py` (full unit suite, <2 s on a laptop),
+`bash test-harness.sh` (end-to-end integration), and `./demo.sh` (captured
+multi-section transcript) to verify any row above.
+
+### Published, eval-gated benchmarks
+
+- **Retrieval recall@5 = 0.8704** on a deterministic probe set (recall@5 /
+  MRR / hit@1 by category).
+- **LOCOMO retrieval-only = 0.4849** across **1,986** questions
+  (`snap-research/locomo`).
+- **Continuity = 0.96 aggregate / 1.00 cross-session** (substrate dryrun, v0.7.1).
+- Throughput (single-thread reference): **0.21 ms/write**, **7.17 ms** search
+  p50 over a 10K corpus, **1.20 ms (0.24%)** Brain wrapper overhead at
+  realistic model latency.
+- A `check_regression.py` gate fails any change that drops a tracked metric.
+  Harness + datasets live in [`atxgreene/mnemosyne-lab`](https://github.com/atxgreene/mnemosyne-lab).
 
 ---
 
@@ -52,79 +77,53 @@ Full test count: **145 unit tests** + shellcheck + pyflakes + install-smoke
 
 These work in the happy path but haven't been pressure-tested at scale.
 
-- **Dream consolidation with a live LLM summarizer.** The clustering and
-  the stdlib fallback are verified. The model-backed summarizer is wired
-  via `dreams.make_brain_summarizer(brain)` and honored by the brain's
-  dream hook, but we do not yet measure whether the L2 abstracts
-  actually improve downstream retrieval. That's the next A/B.
-- **Proposer writes markdown proposals deterministically from triage
-  clusters.** The rules cover 5 cluster shapes. Nothing *applies* a
-  proposal automatically — by design. An applier is on the list (below).
-- **Inner dialogue routing.** `should_deliberate` is a keyword+tag
-  heuristic. It does not learn which turns benefit. Measuring this
-  requires a scenario set that splits fairly between reasoning-heavy
-  and reasoning-light turns; we don't have that yet.
+- **Hybrid lexical + semantic retrieval (RRF fusion over FTS5 +
+  embeddings).** Implemented and under evaluation; promoted to default only
+  when the paraphrase-recall gate improves with no precision regression.
+- **Dream consolidation with a live LLM summarizer.** Clustering and the
+  stdlib fallback are verified; the model-backed summarizer is wired
+  (`dreams.make_brain_summarizer(brain)`) but we have not yet measured
+  whether the L2 abstracts improve downstream retrieval. That's the next A/B.
+- **Inner-dialogue routing.** `should_deliberate` is a keyword + tag
+  heuristic; it does not yet learn which turns benefit.
 - **19 model providers.** OpenAI-compatible + Anthropic native + Ollama
-  native are exercised in unit tests via mocked HTTP. Cloud-provider
-  end-to-end runs require credentials and are gated in CI.
+  native are exercised via mocked HTTP; full cloud end-to-end runs require
+  credentials and are gated in CI.
+- **Training bridge end-to-end.** Export/compress/deploy/eval are covered;
+  a full Unsloth LoRA run depends on your GPU and the `[train]` extra.
 
 ---
 
-## Research-grade, documented but not yet shipped
+## Research-grade — documented, not yet shipped
 
-These are architectural directions that the codebase is *shaped to
-accept* but which we have not implemented.
+Directions the codebase is *shaped to accept* but which are not implemented.
 
-- **LLM-driven proposer.** The current `mnemosyne_proposer` uses hand-
-  written rules. The Stanford Meta-Harness paper uses a coding agent
-  (e.g. Claude Code) to generate proposal code directly. The filesystem
-  interface (`PROP-NNNN-slug.md` with yaml frontmatter) is designed for
-  drop-in replacement.
-- **Closed-loop proposal apply + eval.** Proposals are human-reviewed
-  today. A future `mnemosyne-apply` could execute an accepted proposal's
-  change, re-run a scenario sweep, and mark the proposal
-  `status: accepted` or `status: reverted` based on the Pareto delta.
-- **Embedding-based memory clustering for dreams.** Current dream
-  consolidation uses TF-IDF-ish token overlap. Swapping in sentence
-  embeddings would tighten clusters. Interface is stable.
-- **Inner-dialogue router.** A learned classifier over `(user_message,
-  memory_context)` predicting whether inner dialogue improves accuracy.
-  Needs a labeled scenario set first.
-- **Hybrid attention backend.** Qwen 3.5's DeltaNet and Mamba-3 style
-  models are supported as Ollama targets today, but the brain does not
-  exploit the context-length advantage. A long-context scenario set
-  would expose this.
+- **LLM-driven proposer.** Today `mnemosyne_proposer` uses hand-written
+  rules over 5 cluster shapes. The Meta-Harness paper uses a coding agent to
+  generate proposal code directly; the `PROP-NNNN-slug.md` filesystem
+  interface is designed for drop-in replacement.
+- **Manifold-aware L4 pattern memory.** Upgrade L4 from flat summaries to
+  connected concept neighbourhoods (relations, boundaries, failure modes),
+  guided by neural-geometry research. Gated by retrieval/continuity evals.
+- **Learned inner-dialogue router.** A classifier over
+  `(user_message, memory_context)` predicting whether deliberation improves
+  accuracy. Needs a labelled scenario set first.
+- **Long-context exploitation.** DeltaNet / Mamba-style models are supported
+  as Ollama targets, but the brain does not yet exploit their context-length
+  advantage.
 
 ---
-
-## Concrete next-steps after v0.4.0
-
-In rough order of impact-per-effort (tier 1 first):
-
-| Item | Why it matters | Effort |
-|---|---|---|
-| **Live-LLM end-to-end test** | All 218 tests use mocked `chat_fn`. The framework's main job is unproven against a real model. Run one Ollama-backed conversation, verify identity lock, measure wrapper overhead in the wild, record a real-model GIF. | ~half day with Ollama running |
-| **Cross-process schema lock** | `_SCHEMA_INIT_LOCK` only serializes within one interpreter. Two processes (e.g. `mnemosyne-serve` + a `mnemosyne-batch` job) can still race on FTS5 vtable creation. Filesystem `flock` would close it. | ~2 hours |
-| **Bidirectional avatar** | Today the avatar visualizes agent state. Reverse it: low health → reduce `memory_retrieval_limit`; high wisdom → expand memory ceiling; consolidate mood → pause new turns until dreams catch up. Closes a loop the existing UI doesn't. | ~half day |
-| **Resolver auto-suggest** | `mnemosyne-resolver check` flags weak descriptions. `mnemosyne-resolver suggest` would call the local model to propose better ones. Closes the audit loop. | ~half day |
-| **Goal-pursuit cron** | Daemon background job: every N hours, run inner-dialogue against open goals, propose next steps, log them as candidate turns. Surfaces in dashboard. Makes the agent proactive instead of purely reactive. | ~1 day |
-| **JSONL rotation** | Agent at 200 turns/day generates ~55 MB/year in events.jsonl. No rotation today. Add `mnemosyne-experiments rotate --keep-days N` and a daemon cron. | ~3 hours |
-| **TelemetrySession persistent file handle** | Profile shows 24μs per `log()` call due to open/close per write. For batch runs that's the bottleneck. Keep handle open between writes; flush on N-event boundaries. | ~2 hours |
-| **GitHub release + PyPI publish** | The `0.4.0` artifacts are built and `twine check`-clean. Cut a tag, push to PyPI, write a GitHub release with the v0.4.0 CHANGELOG. | ~30 min once you have credentials |
 
 ## Aspirational (on the list, not yet scoped)
 
-- **Behavioral coupling**: two Mnemosyne instances negotiating over a
-  shared memory store. Needs a protocol spec before any code.
-- **Dream-driven skill synthesis**: the dream loop proposes *new skill
-  files* (not just summaries) when it detects a recurring procedural
-  pattern. Overlap with the proposer loop — design needed.
-- **Continuous identity-audit via statistical control charts**: treat
-  identity slip rate as a process variable and raise alarms when it
-  drifts, not just when the filter catches a single slip.
-- **Federated personal agents**: an opinionated wire protocol so user
-  A's Mnemosyne can query user B's Mnemosyne with consent tokens. This
-  is a product decision, not a research one.
+- **Behavioral coupling**: two Mnemosyne instances negotiating over a shared
+  memory store. Needs a protocol spec first.
+- **Dream-driven skill synthesis**: the dream loop proposes *new skill files*
+  when it detects a recurring procedural pattern.
+- **Continuous identity audit via statistical control charts**: treat the
+  identity-slip rate as a process variable and alarm on drift.
+- **Federated personal agents**: a consent-token wire protocol so one user's
+  Mnemosyne can query another's.
 
 ---
 
@@ -132,37 +131,34 @@ In rough order of impact-per-effort (tier 1 first):
 
 - **Not AGI, not a path to AGI.** These are engineering primitives for
   building usable local-first agents that are observable, tunable, and
-  identity-stable. They are not claims about emergent general
-  intelligence.
+  identity-stable.
 - **Not a benchmarks-chaser.** We do not tune against SWE-bench,
   Terminal-Bench, or GAIA. The scenarios file is a smoke test, not a
-  leaderboard submission.
-- **Not a replacement for the frontier labs' SDKs.** Mnemosyne wraps
-  those labs' APIs (OpenAI, Anthropic, Google, xAI, Mistral, Cohere)
-  as one of 19 backends. It does not reimplement them. If you want
-  the frontier, use the frontier; if you want local-first observability
-  around the frontier, this is that layer.
+  leaderboard submission. The benchmarks we *do* publish (retrieval, LOCOMO,
+  continuity) measure the memory substrate, and ship with reproduction
+  commands.
+- **Not a replacement for the frontier labs' SDKs.** Mnemosyne wraps those
+  APIs as 1 of 19 backends; it does not reimplement them. Want the frontier?
+  Use the frontier. Want local-first observability around it? This is that
+  layer.
 
 ---
 
 ## How to verify anything on this page
 
-Every "shipped and verifiable" row has a corresponding test. To verify
-locally:
-
 ```sh
 git clone https://github.com/atxgreene/Mnemosyne.git
 cd Mnemosyne
 pip install -e .
-python3 tests/test_all.py          # 122 unit tests, <2s on laptops
-./demo.sh                           # end-to-end narrative demo
+python3 tests/test_all.py          # full unit suite, <2s on laptops
+bash test-harness.sh                # end-to-end integration assertions
+./demo.sh                           # captured multi-section transcript
 ./validate-mnemosyne.sh             # environment health check
 ```
 
-To reproduce the Meta-Harness-style loop locally, without real failures:
+To exercise the Meta-Harness loop locally without real failures:
 
 ```sh
-# Seed a tiny run with a synthetic identity slip
 MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo \
   python3 -c "
 import harness_telemetry as ht
@@ -172,13 +168,10 @@ with ht.TelemetrySession(rid) as sess:
              metadata={'slips': ['I am Claude'], 'count': 1})
 ht.finalize_run(rid, metrics={})
 "
-# Triage it
 MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo mnemosyne-triage scan --json
-# Propose
 MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo mnemosyne-proposer --min-severity 0
 ls /tmp/mnemo-demo/proposals/
 ```
 
-If these commands run on your machine and output proposals, the loop is
-verified for you. If they don't, open an issue — the docs are the first
-thing to fix.
+If these run and emit proposals, the loop is verified for you. If they
+don't, open an issue — the docs are the first thing to fix.
