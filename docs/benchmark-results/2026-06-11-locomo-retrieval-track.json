@@ -1,0 +1,480 @@
+{
+  "_metadata": {
+    "benchmark": "LOCOMO retrieval track (snap-research/locomo, locomo10.json)",
+    "date_utc": "2026-06-11",
+    "substrate": "Mnemosyne MemoryStore (SQLite FTS5 BM25 + strength weighting), v0.9.8 runner",
+    "runner": "bench/locomo.py v0.9.8",
+    "dataset": "locomo10.json, 10 conversations, 5,882 turns, 1,986 QA (1,540 non-adversarial + 446 adversarial)",
+    "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+    "judge": "substring (case-insensitive substring/token match; deterministic lower bound, no API key)",
+    "scoring_protocol": "Headline score over the 1,540 non-adversarial questions (categories 1-4), matching published LOCOMO evals (e.g. Mem0 arXiv:2504.19413) which exclude category 5. Adversarial requires a model to abstain and is scored only in --llm-grounded runs. NOTE: previously published 0.4849/1,986 from this repo is the same underlying run quality - it divided by all 1,986 questions including 446 adversarial rows that cannot pass in retrieval-only mode (962/1986=0.4844). Runner <0.9.8 also had category labels 1<->4 and 2<->3 swapped; per-category rows below use the corrected mapping.",
+    "hardware": "Linux 6.18.5 x86_64 cloud sandbox (Claude Code), Python 3.11.15, single thread",
+    "cost_usd": 0.0,
+    "reproduce": [
+      "curl -L https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json -o bench/data/locomo10.json",
+      "python3 bench/locomo.py --substrate mnemosyne --retrieval-mode fts --out bench/results/locomo-fts-full.json",
+      "python3 bench/locomo.py --substrate mnemosyne --retrieval-mode recency --out bench/results/locomo-recency-full.json",
+      "python3 bench/locomo.py --substrate mnemosyne --retrieval-mode random --out bench/results/locomo-random-full.json",
+      "python3 bench/locomo.py --substrate mnemosyne --retrieval-mode full --out bench/results/locomo-full-full.json"
+    ]
+  },
+  "runs": {
+    "fts": {
+      "score": 0.6247,
+      "passed": 962,
+      "total": 1540,
+      "adversarial": {
+        "total": 446,
+        "scored": 0,
+        "passed": 0,
+        "score": null,
+        "note": "not scored: retrieval-only mode has no model to abstain; excluded from headline score"
+      },
+      "score_with_adversarial": 0.6247,
+      "samples_run": 10,
+      "by_category": {
+        "multi_hop": {
+          "total": 282,
+          "passed": 165,
+          "score": 0.5851
+        },
+        "open_domain": {
+          "total": 96,
+          "passed": 42,
+          "score": 0.4375
+        },
+        "single_hop": {
+          "total": 841,
+          "passed": 649,
+          "score": 0.7717
+        },
+        "temporal": {
+          "total": 321,
+          "passed": 106,
+          "score": 0.3302
+        }
+      },
+      "evidence_recall": {
+        "mean": 0.5009,
+        "all_found_rate": 0.4583,
+        "n": 1536,
+        "by_category": {
+          "multi_hop": 0.1909,
+          "open_domain": 0.2304,
+          "single_hop": 0.5979,
+          "temporal": 0.5968
+        }
+      },
+      "latency": {
+        "search": {
+          "n": 1986,
+          "mean_ms": 5.35,
+          "p50_ms": 2.76,
+          "p95_ms": 21.87,
+          "max_ms": 391.82
+        },
+        "llm": {
+          "n": 0
+        },
+        "wall_clock_s": 13.1
+      },
+      "tokens": {
+        "method": {
+          "ingested": "chars/4 estimate",
+          "context": "chars/4"
+        },
+        "ingested_total_est": 179524,
+        "context_per_probe_mean_est": 319,
+        "context_per_probe_p95_est": 431,
+        "context_total_est": 632860
+      },
+      "ingest": {
+        "samples": 10,
+        "turns_total": 5882,
+        "seconds": 2.38,
+        "writes_per_sec": 2467
+      },
+      "cost_usd": 0.0,
+      "judge": "substring",
+      "_metadata": {
+        "benchmark": "LOCOMO (snap-research/locomo, locomo10.json)",
+        "runner": "bench/locomo.py v0.9.8",
+        "substrate": "mnemosyne",
+        "retrieval_mode": "fts",
+        "top_k": 8,
+        "llm_grounded": false,
+        "provider": null,
+        "model": null,
+        "judge": "substring",
+        "judge_model": null,
+        "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+        "git_commit": "b73d1c8",
+        "python": "3.11.15",
+        "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+        "date_utc": "2026-06-11 13:24:27",
+        "argv": [
+          "--substrate",
+          "mnemosyne",
+          "--retrieval-mode",
+          "fts",
+          "--db-path",
+          "/tmp/locomo-fts.db",
+          "--out",
+          "bench/results/locomo-fts-full.json"
+        ]
+      }
+    },
+    "recency": {
+      "score": 0.2468,
+      "passed": 380,
+      "total": 1540,
+      "adversarial": {
+        "total": 446,
+        "scored": 0,
+        "passed": 0,
+        "score": null,
+        "note": "not scored: retrieval-only mode has no model to abstain; excluded from headline score"
+      },
+      "score_with_adversarial": 0.2468,
+      "samples_run": 10,
+      "by_category": {
+        "multi_hop": {
+          "total": 282,
+          "passed": 85,
+          "score": 0.3014
+        },
+        "open_domain": {
+          "total": 96,
+          "passed": 30,
+          "score": 0.3125
+        },
+        "single_hop": {
+          "total": 841,
+          "passed": 254,
+          "score": 0.302
+        },
+        "temporal": {
+          "total": 321,
+          "passed": 11,
+          "score": 0.0343
+        }
+      },
+      "evidence_recall": {
+        "mean": 0.0054,
+        "all_found_rate": 0.0046,
+        "n": 1536,
+        "by_category": {
+          "multi_hop": 0.0035,
+          "open_domain": 0.0027,
+          "single_hop": 0.0071,
+          "temporal": 0.0031
+        }
+      },
+      "latency": {
+        "search": {
+          "n": 1986,
+          "mean_ms": 0.0,
+          "p50_ms": 0.0,
+          "p95_ms": 0.0,
+          "max_ms": 0.04
+        },
+        "llm": {
+          "n": 0
+        },
+        "wall_clock_s": 3.4
+      },
+      "tokens": {
+        "method": {
+          "ingested": "chars/4 estimate",
+          "context": "chars/4"
+        },
+        "ingested_total_est": 179524,
+        "context_per_probe_mean_est": 299,
+        "context_per_probe_p95_est": 398,
+        "context_total_est": 593418
+      },
+      "ingest": {
+        "samples": 10,
+        "turns_total": 5882,
+        "seconds": 3.3,
+        "writes_per_sec": 1783
+      },
+      "cost_usd": 0.0,
+      "judge": "substring",
+      "_metadata": {
+        "benchmark": "LOCOMO (snap-research/locomo, locomo10.json)",
+        "runner": "bench/locomo.py v0.9.8",
+        "substrate": "mnemosyne",
+        "retrieval_mode": "recency",
+        "top_k": 8,
+        "llm_grounded": false,
+        "provider": null,
+        "model": null,
+        "judge": "substring",
+        "judge_model": null,
+        "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+        "git_commit": "b73d1c8",
+        "python": "3.11.15",
+        "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+        "date_utc": "2026-06-11 13:24:31",
+        "argv": [
+          "--substrate",
+          "mnemosyne",
+          "--retrieval-mode",
+          "recency",
+          "--db-path",
+          "/tmp/locomo-recency.db",
+          "--out",
+          "bench/results/locomo-recency-full.json"
+        ]
+      }
+    },
+    "random": {
+      "score": 0.2799,
+      "passed": 431,
+      "total": 1540,
+      "adversarial": {
+        "total": 446,
+        "scored": 0,
+        "passed": 0,
+        "score": null,
+        "note": "not scored: retrieval-only mode has no model to abstain; excluded from headline score"
+      },
+      "score_with_adversarial": 0.2799,
+      "samples_run": 10,
+      "by_category": {
+        "multi_hop": {
+          "total": 282,
+          "passed": 101,
+          "score": 0.3582
+        },
+        "open_domain": {
+          "total": 96,
+          "passed": 29,
+          "score": 0.3021
+        },
+        "single_hop": {
+          "total": 841,
+          "passed": 271,
+          "score": 0.3222
+        },
+        "temporal": {
+          "total": 321,
+          "passed": 30,
+          "score": 0.0935
+        }
+      },
+      "evidence_recall": {
+        "mean": 0.0198,
+        "all_found_rate": 0.015,
+        "n": 1536,
+        "by_category": {
+          "multi_hop": 0.0177,
+          "open_domain": 0.0082,
+          "single_hop": 0.0188,
+          "temporal": 0.0275
+        }
+      },
+      "latency": {
+        "search": {
+          "n": 1986,
+          "mean_ms": 0.01,
+          "p50_ms": 0.01,
+          "p95_ms": 0.02,
+          "max_ms": 0.16
+        },
+        "llm": {
+          "n": 0
+        },
+        "wall_clock_s": 3.2
+      },
+      "tokens": {
+        "method": {
+          "ingested": "chars/4 estimate",
+          "context": "chars/4"
+        },
+        "ingested_total_est": 179524,
+        "context_per_probe_mean_est": 302,
+        "context_per_probe_p95_est": 396,
+        "context_total_est": 600223
+      },
+      "ingest": {
+        "samples": 10,
+        "turns_total": 5882,
+        "seconds": 3.06,
+        "writes_per_sec": 1925
+      },
+      "cost_usd": 0.0,
+      "judge": "substring",
+      "_metadata": {
+        "benchmark": "LOCOMO (snap-research/locomo, locomo10.json)",
+        "runner": "bench/locomo.py v0.9.8",
+        "substrate": "mnemosyne",
+        "retrieval_mode": "random",
+        "top_k": 8,
+        "llm_grounded": false,
+        "provider": null,
+        "model": null,
+        "judge": "substring",
+        "judge_model": null,
+        "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+        "git_commit": "b73d1c8",
+        "python": "3.11.15",
+        "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+        "date_utc": "2026-06-11 13:24:34",
+        "argv": [
+          "--substrate",
+          "mnemosyne",
+          "--retrieval-mode",
+          "random",
+          "--db-path",
+          "/tmp/locomo-random.db",
+          "--out",
+          "bench/results/locomo-random-full.json"
+        ]
+      }
+    },
+    "full": {
+      "score": 0.8727,
+      "passed": 1344,
+      "total": 1540,
+      "adversarial": {
+        "total": 446,
+        "scored": 0,
+        "passed": 0,
+        "score": null,
+        "note": "not scored: retrieval-only mode has no model to abstain; excluded from headline score"
+      },
+      "score_with_adversarial": 0.8727,
+      "samples_run": 10,
+      "by_category": {
+        "multi_hop": {
+          "total": 282,
+          "passed": 270,
+          "score": 0.9574
+        },
+        "open_domain": {
+          "total": 96,
+          "passed": 69,
+          "score": 0.7188
+        },
+        "single_hop": {
+          "total": 841,
+          "passed": 833,
+          "score": 0.9905
+        },
+        "temporal": {
+          "total": 321,
+          "passed": 172,
+          "score": 0.5358
+        }
+      },
+      "evidence_recall": {
+        "mean": 0.9961,
+        "all_found_rate": 0.9941,
+        "n": 1536,
+        "by_category": {
+          "multi_hop": 0.9943,
+          "open_domain": 0.9674,
+          "single_hop": 0.9996,
+          "temporal": 0.9969
+        }
+      },
+      "latency": {
+        "search": {
+          "n": 1986,
+          "mean_ms": 0.13,
+          "p50_ms": 0.13,
+          "p95_ms": 0.21,
+          "max_ms": 0.47
+        },
+        "llm": {
+          "n": 0
+        },
+        "wall_clock_s": 5.1
+      },
+      "tokens": {
+        "method": {
+          "ingested": "chars/4 estimate",
+          "context": "chars/4"
+        },
+        "ingested_total_est": 179524,
+        "context_per_probe_mean_est": 22576,
+        "context_per_probe_p95_est": 26826,
+        "context_total_est": 44836468
+      },
+      "ingest": {
+        "samples": 10,
+        "turns_total": 5882,
+        "seconds": 3.32,
+        "writes_per_sec": 1773
+      },
+      "cost_usd": 0.0,
+      "judge": "substring",
+      "_metadata": {
+        "benchmark": "LOCOMO (snap-research/locomo, locomo10.json)",
+        "runner": "bench/locomo.py v0.9.8",
+        "substrate": "mnemosyne",
+        "retrieval_mode": "full",
+        "top_k": 8,
+        "llm_grounded": false,
+        "provider": null,
+        "model": null,
+        "judge": "substring",
+        "judge_model": null,
+        "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+        "git_commit": "b73d1c8",
+        "python": "3.11.15",
+        "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+        "date_utc": "2026-06-11 13:24:40",
+        "argv": [
+          "--substrate",
+          "mnemosyne",
+          "--retrieval-mode",
+          "full",
+          "--db-path",
+          "/tmp/locomo-full.db",
+          "--out",
+          "bench/results/locomo-full-full.json"
+        ]
+      }
+    }
+  },
+  "top_k_sweep_fts": {
+    "k2": {
+      "score": 0.4377,
+      "evidence_recall_mean": 0.3436,
+      "context_tokens_per_probe_est": 81,
+      "search_p50_ms": 1.84,
+      "search_p95_ms": 3.64
+    },
+    "k4": {
+      "score": 0.5422,
+      "evidence_recall_mean": 0.4201,
+      "context_tokens_per_probe_est": 160,
+      "search_p50_ms": 2.23,
+      "search_p95_ms": 4.73
+    },
+    "k8": {
+      "score": 0.6247,
+      "evidence_recall_mean": 0.5009,
+      "context_tokens_per_probe_est": 319,
+      "search_p50_ms": 2.76,
+      "search_p95_ms": 21.87
+    },
+    "k16": {
+      "score": 0.6948,
+      "evidence_recall_mean": 0.5602,
+      "context_tokens_per_probe_est": 643,
+      "search_p50_ms": 3.74,
+      "search_p95_ms": 23.67
+    },
+    "k32": {
+      "score": 0.7552,
+      "evidence_recall_mean": 0.6264,
+      "context_tokens_per_probe_est": 1296,
+      "search_p50_ms": 6.57,
+      "search_p95_ms": 28.08
+    }
+  }
+}

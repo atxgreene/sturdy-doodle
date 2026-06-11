@@ -78,7 +78,13 @@ Measured against the eval harness in `experiments/evals/`:
 |---|---|
 | recall@5 overall | 0.87 |
 | paraphrase recall@5 | 0.625 |
-| LOCOMO score | 0.4849 |
+| LOCOMO retrieval track (1,540 scored q) | 0.6247 |
+| LOCOMO evidence recall@8 | 0.5009 |
+
+(LOCOMO protocol + baselines + token/latency/cost detail:
+[`docs/BENCHMARKS_LOCOMO.md`](../../docs/BENCHMARKS_LOCOMO.md). The
+earlier 0.4849 figure divided the same run by all 1,986 questions
+including 446 adversarial ones that retrieval-only mode cannot pass.)
 
 The paraphrase gap is the primary optimization target: wiring
 `mnemosyne_embeddings.py` into `MemoryStore.search()` with rank fusion

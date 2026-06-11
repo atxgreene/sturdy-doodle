@@ -62,8 +62,15 @@ multi-section transcript) to verify any row above.
 
 - **Retrieval recall@5 = 0.8704** on a deterministic probe set (recall@5 /
   MRR / hit@1 by category).
-- **LOCOMO retrieval-only = 0.4849** across **1,986** questions
-  (`snap-research/locomo`).
+- **LOCOMO retrieval track = 0.6247** answer-in-context / **0.5009**
+  evidence recall@8 over the standard 1,540 scored questions
+  (`snap-research/locomo`), vs 0.2468 recency / 0.2799 random
+  same-protocol baselines and a 0.8727 full-context ceiling — at 319
+  context tokens/probe vs 22,576. Full reproducible setup, top-k
+  sweep, and token/latency/cost: [`docs/BENCHMARKS_LOCOMO.md`](./BENCHMARKS_LOCOMO.md).
+  (Supersedes the earlier 0.4849/1,986 figure, which divided the same
+  run by a denominator including 446 unanswerable-without-a-model
+  adversarial questions.)
 - **Continuity = 0.96 aggregate / 1.00 cross-session** (substrate dryrun, v0.7.1).
 - Throughput (single-thread reference): **0.21 ms/write**, **7.17 ms** search
   p50 over a 10K corpus, **1.20 ms (0.24%)** Brain wrapper overhead at
