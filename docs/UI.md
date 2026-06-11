@@ -4,6 +4,12 @@ Browser dashboard. Single-page, vanilla JS, served by `mnemosyne-serve`.
 No build step, no framework, no dependencies beyond what `mnemosyne-serve`
 already brings in.
 
+> **Note:** the dashboard predates the Hermes integration. The current
+> production memory backend is the Hermes memory provider documented in
+> [HERMES.md](HERMES.md); both sit on the same 6-tier ICMS store
+> (L0 Instinct / L1 Hot / L2 Warm / L3 Cold / L4 Pattern / L5 Identity)
+> described there.
+
 ![dashboard](dashboard.png)
 
 ## Quick start
@@ -34,8 +40,9 @@ Six panels arranged in a responsive grid:
 - **Events (right)** — SSE-streamed `events.jsonl` rows from the
   daemon's run. Falls back to polling when an auth token is set
   (EventSource can't carry custom headers).
-- **Memory tiers (bottom middle)** — L1 hot / L2 warm / L3 cold counts
-  with proportional bars.
+- **Memory tiers (bottom middle)** — per-tier memory counts with
+  proportional bars. See [Memory tiers](#memory-tiers) for the 6-tier
+  model behind the panel.
 - **Goals (bottom right)** — open goals from `goals.jsonl`. Add and
   resolve inline.
 
@@ -142,11 +149,35 @@ breaking anything that already exists.
 Existing endpoints (`/turn`, `/stats`, `/goals`, `/recent_events`,
 `/healthz`, etc.) are unchanged and consumed by `app.js`.
 
+## Memory tiers
+
+The store underneath the dashboard is the full 6-tier ICMS — six
+tiers, L0 through L5, and nothing above them (reflection, dreaming,
+extraction, and journaling are services that operate *on* the tiers,
+not tiers themselves):
+
+| Tier | Name | Role |
+|---|---|---|
+| L0 | Instinct | distilled fast-path reflex cache |
+| L1 | Hot | working context, current session |
+| L2 | Warm | recent working context |
+| L3 | Cold | long-term store |
+| L4 | Pattern | consolidated patterns from dream consolidation |
+| L5 | Identity | human-approved identity memories |
+
+`GET /stats` reports row counts for all six tiers in `by_tier`, and
+the topbar memory-count pill is the total across L0–L5. The "Memory
+tiers" panel charts the conversational tiers (L1/L2/L3) as
+proportional bars — those are the tiers a live chat session writes
+to and the ones that move turn-by-turn; L0/L4/L5 counts are in the
+`/stats` payload.
+
 ## Memory browser
 
 The bottom panel of the dashboard is a live FTS5 search over the
-agent's memory. Type a query, pick a tier ceiling (all / L1 / L1+L2 /
-all three), hit `Find` — results stream back with the matching
+agent's memory. Type a query, pick a tier ceiling (`tier_max` —
+unset searches all six tiers L0–L5; the dropdown presets cap at
+L1, L2, or L3), hit `Find` — results stream back with the matching
 content, tier pill, kind, creation date, and access count.
 
 Use cases:
@@ -157,7 +188,8 @@ Use cases:
 - **Audit what the agent knows.** Before trusting the agent with a
   new task, browse the memory for anything that could leak.
 - **Spot duplicates.** Frequent near-duplicates in L1 are a signal
-  that dream consolidation should run.
+  that dream consolidation should run (compacting stable patterns
+  up into L4).
 
 The endpoint caps results at 50 per request — enough to be useful,
 not enough to leak the whole database in one query. Content is
