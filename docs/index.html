@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mnemosyne — Cognitive OS for Local-First AI Agents</title>
+<meta name="description" content="A drop-in memory provider for Hermes Agent. Stdlib-only core, 6-tier ICMS memory, runtime-validated, eval-gated benchmarks. One pip install away.">
+<meta property="og:title" content="Mnemosyne — Cognitive OS for Local-First AI Agents">
+<meta property="og:description" content="Drop-in memory provider for Hermes Agent. Stdlib-only. 6-tier ICMS. Runtime-validated. Eval-gated benchmarks.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/Mnemosyne2.jpg">
+<meta name="theme-color" content="#070a0f">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800;900&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><polygon points='50,6 88,28 88,72 50,94 12,72 12,28' fill='none' stroke='%237dd3d3' stroke-width='4'/><polygon points='50,30 68,42 68,64 50,76 32,64 32,42' fill='none' stroke='%23c9a84c' stroke-width='3'/><circle cx='50' cy='53' r='6' fill='%237dd3d3'/></svg>">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#070a0f; --bg2:#0a0e15; --surface:#0d121c; --surface2:#111826;
+    --border:#1c2740; --border2:#28344f;
+    --text:#bcc6dc; --dim:#6a7693; --faint:#3c465f;
+    --bright:#eef2fb;
+    --gold:#d8b35a; --gold-soft:#e8c987;
+    --teal:#7dd3d3; --teal-bright:#9af0ec;
+    --orange:#d4601f; --amber:#e8b97e;
+    --violet:#9d7bd8; --green:#5fd39a;
+    --serif:'Cormorant Garamond',Georgia,serif;
+    --display:'Cinzel',serif;
+    --mono:'JetBrains Mono','IBM Plex Mono',monospace;
+    --maxw:1180px;
+  }
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:var(--mono); font-size:15px; line-height:1.6;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  a{color:var(--teal); text-decoration:none}
+  ::selection{background:rgba(125,211,211,.25); color:var(--bright)}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 28px}
+
+  /* ── NAV ─────────────────────────────────────────── */
+  nav{
+    position:fixed; top:0; left:0; right:0; z-index:100; height:60px;
+    display:flex; align-items:center;
+    background:rgba(7,10,15,.72); backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--border);
+  }
+  nav .wrap{display:flex; align-items:center; justify-content:space-between; width:100%}
+  .brand{display:flex; align-items:center; gap:11px; font-family:var(--display); font-weight:700;
+    letter-spacing:2px; color:var(--bright); font-size:16px}
+  .brand .hex{width:24px;height:24px;display:inline-block}
+  .navlinks{display:flex; gap:26px; align-items:center}
+  .navlinks a{color:var(--dim); font-size:12.5px; letter-spacing:1px; text-transform:uppercase; transition:color .2s}
+  .navlinks a:hover{color:var(--teal)}
+  .nav-cta{border:1px solid var(--border2); padding:8px 16px; border-radius:6px; color:var(--text)!important;
+    transition:.2s; background:var(--surface)}
+  .nav-cta:hover{border-color:var(--teal); color:var(--teal)!important; box-shadow:0 0 18px rgba(125,211,211,.15)}
+  @media(max-width:860px){.navlinks a:not(.nav-cta){display:none}}
+
+  /* ── HERO ────────────────────────────────────────── */
+  header.hero{position:relative; min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:120px 20px 80px; overflow:hidden}
+  #glyphCanvas{position:absolute; inset:0; width:100%; height:100%; z-index:0; opacity:.55}
+  .hero-bg{position:absolute; inset:0; z-index:0;
+    background:
+      radial-gradient(ellipse 60% 50% at 50% 42%, rgba(125,211,211,.10), transparent 70%),
+      radial-gradient(ellipse 80% 60% at 50% 100%, rgba(20,28,46,.7), transparent),
+      var(--bg);
+  }
+  .hero-owl{position:absolute; z-index:1; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:min(1100px,108vw); max-width:none; opacity:.30;
+    -webkit-mask-image:radial-gradient(ellipse 52% 60% at 50% 46%, #000 30%, transparent 72%);
+    mask-image:radial-gradient(ellipse 52% 60% at 50% 46%, #000 30%, transparent 72%);
+    pointer-events:none; animation:floaty 9s ease-in-out infinite}
+  @keyframes floaty{0%,100%{transform:translate(-50%,-51%)}50%{transform:translate(-50%,-49%)}}
+  .hero-content{position:relative; z-index:3; max-width:880px}
+  .kicker{font-family:var(--mono); font-size:12px; letter-spacing:5px; text-transform:uppercase;
+    color:var(--teal); margin-bottom:22px; opacity:0; animation:rise .8s .1s forwards}
+  .kicker .tick{color:var(--gold)}
+  h1.title{font-family:var(--display); font-weight:800; color:var(--bright);
+    font-size:clamp(56px,12vw,140px); line-height:.95; letter-spacing:2px;
+    text-shadow:0 0 60px rgba(125,211,211,.25); opacity:0; animation:rise .9s .2s forwards}
+  .tagline{font-family:var(--serif); font-style:italic; font-size:clamp(20px,3.4vw,32px);
+    color:var(--gold-soft); margin-top:14px; letter-spacing:.5px; opacity:0; animation:rise .9s .35s forwards}
+  .subtag{max-width:600px; margin:24px auto 0; color:var(--text); font-size:15px;
+    opacity:0; animation:rise .9s .5s forwards}
+  .subtag b{color:var(--bright); font-weight:500}
+  .subtag code{font-family:var(--mono); color:var(--amber); font-size:13.5px}
+  @keyframes rise{from{opacity:0; transform:translateY(22px)}to{opacity:1; transform:translateY(0)}}
+  .hero-cta{display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-top:38px;
+    opacity:0; animation:rise .9s .65s forwards}
+  .btn{font-family:var(--mono); font-size:14px; padding:14px 26px; border-radius:8px; cursor:pointer;
+    border:1px solid var(--border2); transition:.22s; display:inline-flex; align-items:center; gap:10px}
+  .btn-primary{background:linear-gradient(135deg,rgba(125,211,211,.16),rgba(216,179,90,.12));
+    border-color:var(--teal); color:var(--bright)}
+  .btn-primary:hover{box-shadow:0 0 28px rgba(125,211,211,.3); transform:translateY(-2px)}
+  .btn-ghost{background:var(--surface); color:var(--text)}
+  .btn-ghost:hover{border-color:var(--gold); color:var(--gold-soft); transform:translateY(-2px)}
+  .hero-chips{display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:42px;
+    opacity:0; animation:rise .9s .8s forwards}
+  .chip{font-size:11.5px; letter-spacing:1px; text-transform:uppercase; color:var(--dim);
+    border:1px solid var(--border); border-radius:20px; padding:7px 15px; background:rgba(13,18,28,.6)}
+  .chip b{color:var(--teal); font-weight:700}
+  .scroll-hint{position:absolute; bottom:26px; left:50%; transform:translateX(-50%); z-index:3;
+    color:var(--faint); font-size:11px; letter-spacing:3px; text-transform:uppercase; animation:pulse 2.4s infinite}
+  @keyframes pulse{0%,100%{opacity:.4}50%{opacity:.9}}
+
+  /* ── SECTION SCAFFOLD ────────────────────────────── */
+  section{position:relative; padding:96px 0; border-top:1px solid var(--border)}
+  .eyebrow{font-family:var(--mono); font-size:12px; letter-spacing:4px; text-transform:uppercase;
+    color:var(--teal); display:flex; align-items:center; gap:12px; margin-bottom:18px}
+  .eyebrow::before{content:''; width:30px; height:1px; background:var(--teal); opacity:.6}
+  h2{font-family:var(--display); font-weight:700; color:var(--bright);
+    font-size:clamp(30px,5vw,52px); line-height:1.05; letter-spacing:1px; margin-bottom:20px}
+  .lede{font-family:var(--serif); font-size:clamp(19px,2.6vw,25px); color:var(--text);
+    max-width:760px; line-height:1.5}
+  .lede em{color:var(--gold-soft); font-style:italic}
+  .lede code{font-family:var(--mono); font-size:14px; color:var(--amber)}
+
+  /* ── THESIS / FLOW ───────────────────────────────── */
+  .thesis-quote{font-family:var(--serif); font-style:italic; font-size:clamp(24px,4vw,40px);
+    color:var(--bright); line-height:1.35; max-width:880px; margin:0 auto; text-align:center}
+  .thesis-quote .hl{color:var(--teal); font-style:normal; border-bottom:1px solid rgba(125,211,211,.4)}
+  .flow{display:grid; grid-template-columns:1fr auto 1fr; gap:0; align-items:center; margin-top:64px;
+    border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--surface)}
+  .flow-col{padding:34px 30px}
+  .flow-col h4{font-family:var(--mono); font-size:12px; letter-spacing:2px; text-transform:uppercase;
+    color:var(--dim); margin-bottom:18px}
+  .flow-mid{border-left:1px solid var(--border); border-right:1px solid var(--border);
+    align-self:stretch; display:flex; align-items:center; justify-content:center; padding:0 24px;
+    background:rgba(125,211,211,.04)}
+  .flow-arrows{font-family:var(--mono); font-size:13px; color:var(--teal); text-align:center; line-height:2}
+  .flow-step{display:flex; align-items:center; gap:12px; padding:9px 0; color:var(--text); font-size:13.5px}
+  .flow-step .g{font-family:var(--mono); color:var(--gold); width:20px; text-align:center}
+  .flow-col.down .flow-step .g{color:var(--orange)}
+  @media(max-width:760px){.flow{grid-template-columns:1fr}.flow-mid{border:none; border-top:1px solid var(--border); border-bottom:1px solid var(--border); padding:18px}.flow-arrows{transform:rotate(90deg)}}
+
+  /* ── BENCHMARKS ──────────────────────────────────── */
+  .bench-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:18px; margin-top:54px}
+  .stat{position:relative; border:1px solid var(--border); border-radius:14px; padding:30px 26px;
+    background:linear-gradient(165deg,var(--surface),var(--bg2)); overflow:hidden; transition:.3s}
+  .stat:hover{border-color:var(--border2); transform:translateY(-3px); box-shadow:0 14px 40px rgba(0,0,0,.4)}
+  .stat::after{content:''; position:absolute; top:0; right:0; width:80px; height:80px;
+    background:radial-gradient(circle at top right,rgba(125,211,211,.14),transparent 70%)}
+  .stat .num{font-family:var(--display); font-weight:700; font-size:46px; color:var(--bright); line-height:1; display:inline}
+  .stat .num.teal{color:var(--teal)} .stat .num.gold{color:var(--gold-soft)} .stat .num.green{color:var(--green)}
+  .stat .unit{font-family:var(--mono); font-size:16px; color:var(--dim); margin-left:4px}
+  .stat .label{font-family:var(--mono); font-size:12px; letter-spacing:1px; text-transform:uppercase;
+    color:var(--text); margin-top:14px}
+  .stat .sub{color:var(--dim); margin-top:6px; font-family:var(--serif); font-size:15px; line-height:1.4}
+  .stat .sub b{color:var(--text)}
+  .bench-note{margin-top:34px; color:var(--dim); border-left:2px solid var(--gold);
+    padding-left:16px; font-family:var(--serif); font-size:16px; max-width:760px; line-height:1.5}
+  .bench-note code{font-family:var(--mono); font-size:12.5px; color:var(--amber); background:var(--surface);
+    padding:2px 6px; border-radius:4px}
+
+  /* ── HERMES ──────────────────────────────────────── */
+  .hermes-grid{display:grid; grid-template-columns:1.05fr .95fr; gap:40px; margin-top:54px; align-items:start}
+  @media(max-width:880px){.hermes-grid{grid-template-columns:1fr}}
+  .terminal{background:#05080d; border:1px solid var(--border2); border-radius:12px; overflow:hidden;
+    box-shadow:0 24px 60px rgba(0,0,0,.5); font-family:var(--mono)}
+  .term-bar{display:flex; align-items:center; gap:8px; padding:11px 15px; background:#0a0f18;
+    border-bottom:1px solid var(--border)}
+  .term-bar .dot{width:11px; height:11px; border-radius:50%}
+  .dot.r{background:#e0533f} .dot.y{background:#e3a838} .dot.g{background:#5fd39a}
+  .term-bar .ttl{margin-left:10px; font-size:12px; color:var(--dim); letter-spacing:1px}
+  .term-body{padding:20px 20px 24px; font-size:13px; line-height:1.9; min-height:330px}
+  .term-line{white-space:pre-wrap; opacity:0; transition:opacity .25s}
+  .term-line.show{opacity:1}
+  .term-cmd{color:var(--bright)} .term-cmd .pr{color:var(--teal)}
+  .term-check{color:var(--text)} .term-pass{color:var(--green); font-weight:700}
+  .term-dim{color:var(--dim)}
+  .hermes-copy h3{font-family:var(--display); color:var(--bright); font-size:25px; margin-bottom:14px; letter-spacing:.5px}
+  .hermes-copy p{margin-bottom:18px}
+  .tool-table{width:100%; border-collapse:collapse; margin-top:10px; font-size:12.5px}
+  .tool-table td{border:1px solid var(--border); padding:11px 13px; vertical-align:top}
+  .tool-table td:first-child{color:var(--teal); font-weight:500; white-space:nowrap; width:38%}
+  .tool-table td:last-child{color:var(--dim)}
+  .badge-row{display:flex; gap:10px; flex-wrap:wrap; margin-top:22px}
+  .vbadge{font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--green);
+    border:1px solid rgba(95,211,154,.4); border-radius:6px; padding:6px 12px; background:rgba(95,211,154,.07)}
+
+  /* ── ARCHITECTURE / TIERS ────────────────────────── */
+  .tiers{margin-top:54px; border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--surface)}
+  .tier{display:grid; grid-template-columns:64px 1fr auto; align-items:center; gap:20px;
+    padding:18px 24px; border-bottom:1px solid var(--border); position:relative; transition:.25s}
+  .tier:last-child{border-bottom:none}
+  .tier:hover{background:rgba(125,211,211,.04)}
+  .tier .tid{font-family:var(--display); font-weight:700; font-size:24px; text-align:center}
+  .tier .tname{font-family:var(--mono); font-size:14px; color:var(--bright); letter-spacing:1px}
+  .tier .tdesc{font-family:var(--serif); font-size:16px; color:var(--dim); margin-top:2px}
+  .tier .tflow{font-family:var(--mono); font-size:18px; letter-spacing:3px}
+  .tier .bar{position:absolute; left:0; top:0; bottom:0; width:3px}
+  .arch-img{margin-top:40px; border:1px solid var(--border); border-radius:14px; overflow:hidden; background:#05080d}
+  .arch-img img{width:100%; display:block}
+  .arch-cap{font-family:var(--serif); font-size:15px; color:var(--dim); text-align:center; padding:16px; line-height:1.5}
+
+  /* ── DASHBOARD ───────────────────────────────────── */
+  .dash-grid{display:grid; grid-template-columns:1fr 1fr; gap:30px; margin-top:54px; align-items:center}
+  @media(max-width:880px){.dash-grid{grid-template-columns:1fr}}
+  .dash-shot{border:1px solid var(--border2); border-radius:12px; overflow:hidden;
+    box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .dash-shot img{width:100%; display:block}
+  .feat-list{list-style:none}
+  .feat-list li{display:flex; gap:14px; padding:14px 0; border-bottom:1px solid var(--border)}
+  .feat-list li:last-child{border:none}
+  .feat-list .fi{font-family:var(--mono); color:var(--teal); font-size:18px}
+  .feat-list b{color:var(--bright); font-weight:500; font-family:var(--mono); font-size:13.5px; letter-spacing:.5px}
+  .feat-list span{display:block; color:var(--dim); font-family:var(--serif); font-size:16px; margin-top:3px}
+  .feat-list code{font-family:var(--mono); font-size:12px; color:var(--amber)}
+
+  /* ── RESEARCH ────────────────────────────────────── */
+  .papers{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px; margin-top:54px}
+  .paper{border:1px solid var(--border); border-radius:12px; padding:26px; background:var(--surface);
+    transition:.25s; display:flex; flex-direction:column}
+  .paper:hover{border-color:var(--teal); transform:translateY(-3px); box-shadow:0 14px 40px rgba(0,0,0,.4)}
+  .paper .ptag{font-family:var(--mono); font-size:11px; letter-spacing:2px; text-transform:uppercase;
+    color:var(--gold); margin-bottom:14px}
+  .paper h4{font-family:var(--serif); font-weight:600; font-size:21px; color:var(--bright); line-height:1.25; margin-bottom:8px}
+  .paper p{font-size:13px; color:var(--dim); flex:1; line-height:1.55}
+  .paper p code{font-family:var(--mono); font-size:11.5px; color:var(--amber)}
+  .paper .plink{font-family:var(--mono); font-size:12px; margin-top:18px; color:var(--teal); letter-spacing:.5px}
+  .paper .plink::after{content:' →'}
+
+  /* ── X ARTICLE ───────────────────────────────────── */
+  .x-wrap{margin-top:48px; display:grid; grid-template-columns:1fr; gap:24px; max-width:680px}
+  .x-card{border:1px solid var(--border2); border-radius:16px; padding:30px 32px; background:var(--surface);
+    position:relative; overflow:hidden}
+  .x-card::before{content:'𝕏'; position:absolute; top:22px; right:26px; font-size:28px; color:var(--faint)}
+  .x-head{display:flex; align-items:center; gap:13px; margin-bottom:18px}
+  .x-av{width:46px; height:46px; border-radius:50%; background:linear-gradient(135deg,#1a2336,#0c1119);
+    border:1px solid var(--border2); display:flex; align-items:center; justify-content:center;
+    font-family:var(--display); color:var(--teal); font-size:20px; font-weight:700}
+  .x-name{font-family:var(--mono); color:var(--bright); font-size:14px; font-weight:500}
+  .x-handle{font-family:var(--mono); color:var(--dim); font-size:12.5px}
+  .x-body{font-family:var(--serif); font-size:19px; line-height:1.5; color:var(--text)}
+  .x-body .hl{color:var(--teal)}
+  .x-foot{margin-top:20px; font-family:var(--mono); font-size:12px; color:var(--dim); display:flex; gap:18px}
+  .x-slot-note{font-family:var(--mono); font-size:12px; color:var(--faint); border:1px dashed var(--border2);
+    border-radius:10px; padding:14px 16px; background:rgba(13,18,28,.4)}
+
+  /* ── INSTALL ─────────────────────────────────────── */
+  .install-box{margin-top:48px; border:1px solid var(--border2); border-radius:14px; overflow:hidden; background:#05080d}
+  .install-box .term-bar{background:#0a0f18}
+  .code{padding:26px 28px; font-family:var(--mono); font-size:13.5px; line-height:2; overflow-x:auto; white-space:pre}
+  .code .c{color:var(--dim)} .code .p{color:var(--teal)} .code .k{color:var(--amber)} .code .o{color:var(--green)}
+  .verify-row{display:flex; gap:14px; flex-wrap:wrap; margin-top:26px}
+  .verify-row .chip{border-color:var(--border2)}
+  .verify-row .chip b{color:var(--amber)}
+
+  /* ── FOOTER ──────────────────────────────────────── */
+  footer{border-top:1px solid var(--border); padding:64px 0 50px; background:var(--bg2)}
+  .foot-grid{display:flex; justify-content:space-between; gap:40px; flex-wrap:wrap}
+  .foot-brand{max-width:340px}
+  .foot-brand .brand{margin-bottom:14px}
+  .foot-brand p{font-family:var(--serif); font-size:16px; color:var(--dim); line-height:1.5}
+  .foot-brand p b{color:var(--text)}
+  .foot-col h5{font-family:var(--mono); font-size:11px; letter-spacing:2px; text-transform:uppercase;
+    color:var(--dim); margin-bottom:16px}
+  .foot-col a{display:block; color:var(--text); font-size:13px; margin-bottom:11px; transition:.2s}
+  .foot-col a:hover{color:var(--teal)}
+  .foot-bottom{margin-top:50px; padding-top:24px; border-top:1px solid var(--border);
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:14px;
+    font-size:12px; color:var(--faint); font-family:var(--mono)}
+  .reveal{opacity:0; transform:translateY(28px); transition:opacity .7s ease, transform .7s ease}
+  .reveal.in{opacity:1; transform:none}
+</style>
+</head>
+<body>
+
+<!-- ───────────────── NAV ───────────────── -->
+<nav>
+  <div class="wrap">
+    <div class="brand">
+      <svg class="hex" viewBox="0 0 100 100"><polygon points="50,6 88,28 88,72 50,94 12,72 12,28" fill="none" stroke="#7dd3d3" stroke-width="4"/><polygon points="50,30 68,42 68,64 50,76 32,64 32,42" fill="none" stroke="#d8b35a" stroke-width="3"/><circle cx="50" cy="53" r="6" fill="#7dd3d3"/></svg>
+      MNEMOSYNE
+    </div>
+    <div class="navlinks">
+      <a href="#thesis">Thesis</a>
+      <a href="#benchmarks">Benchmarks</a>
+      <a href="#hermes">Hermes</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#research">Research</a>
+      <a class="nav-cta" href="https://github.com/atxgreene/Mnemosyne" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ───────────────── HERO ───────────────── -->
+<header class="hero">
+  <div class="hero-bg"></div>
+  <canvas id="glyphCanvas"></canvas>
+  <img class="hero-owl" src="assets/Mnemosyne.jpg" alt="">
+  <div class="hero-content">
+    <div class="kicker">Local-First <span class="tick">·</span> Stdlib-Only <span class="tick">·</span> Hermes-Validated</div>
+    <h1 class="title">Mnemosyne</h1>
+    <div class="tagline">A Cognitive OS for Local-First AI Agents</div>
+    <p class="subtag">A drop-in <b>memory provider for Hermes Agent</b> with a six-tier cognitive memory model, a four-layer identity lock, and offline dream consolidation. <b>Zero runtime dependencies.</b> One <code>pip install</code> away.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#install">▸ pip install mnemosyne-harness</a>
+      <a class="btn btn-ghost" href="https://github.com/atxgreene/Mnemosyne" target="_blank" rel="noopener">View on GitHub ↗</a>
+    </div>
+    <div class="hero-chips">
+      <span class="chip"><b>0</b> runtime deps</span>
+      <span class="chip"><b>19</b> model providers</span>
+      <span class="chip"><b>6</b>-tier ICMS memory</span>
+      <span class="chip"><b>8/8</b> Hermes checks PASS</span>
+    </div>
+  </div>
+  <div class="scroll-hint">scroll ↓</div>
+</header>
+
+<!-- ───────────────── THESIS ───────────────── -->
+<section id="thesis">
+  <div class="wrap reveal">
+    <div class="eyebrow">The Premise</div>
+    <p class="thesis-quote">The problem isn't that agents don't remember. The problem is that memory only flows in <span class="hl">one direction</span>.</p>
+    <p class="lede" style="margin:42px auto 0; text-align:center">Every other system retrieves <em>upward</em> from stored text. Mnemosyne adds the return path — higher-level reflection distilled back down into fast, user-specific instinct. The agent's first response is shaped by what it has learned about <em>you</em>, not just base-model priors.</p>
+
+    <div class="flow">
+      <div class="flow-col up">
+        <h4>↑ Retrieval (everyone)</h4>
+        <div class="flow-step"><span class="g">›</span> Raw turn — "what happened"</div>
+        <div class="flow-step"><span class="g">›</span> Vector store — embed + retrieve</div>
+        <div class="flow-step"><span class="g">›</span> Summary — compress to abstract</div>
+        <div class="flow-step"><span class="g">›</span> Response — context injected</div>
+      </div>
+      <div class="flow-mid">
+        <div class="flow-arrows">↑<br>│<br>╳<br>│<br>↓</div>
+      </div>
+      <div class="flow-col down">
+        <h4>↓ Reflection → Instinct (Mnemosyne)</h4>
+        <div class="flow-step"><span class="g">‹</span> L5 identity + L4 patterns</div>
+        <div class="flow-step"><span class="g">‹</span> Distilled into L0 reflex cache</div>
+        <div class="flow-step"><span class="g">‹</span> Fast-path shapes first token</div>
+        <div class="flow-step"><span class="g">‹</span> Agent acts like it knows you</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────── BENCHMARKS ───────────────── -->
+<section id="benchmarks">
+  <div class="wrap reveal">
+    <div class="eyebrow">Eval-Gated · Reproducible</div>
+    <h2>Benchmarks, not vibes.</h2>
+    <p class="lede">Every number ships with the command that produced it and a regression gate that fails any change which drops a metric. To our knowledge, no other Hermes memory provider publishes eval-gated baselines.</p>
+
+    <div class="bench-grid">
+      <div class="stat">
+        <span class="num green" data-count="8" data-suffix="/8">0/8</span>
+        <div class="label">Hermes runtime checks PASS</div>
+        <div class="sub">Live Hermes v0.16.0 — discovery, routing, persistence, fresh-session recall.</div>
+      </div>
+      <div class="stat">
+        <span class="num teal" data-count="0.8704" data-dec="4">0.0000</span>
+        <div class="label">Retrieval recall@5</div>
+        <div class="sub">Deterministic probe set — recall@5 / MRR / hit@1 by category.</div>
+      </div>
+      <div class="stat">
+        <span class="num gold" data-count="0.4849" data-dec="4">0.0000</span>
+        <div class="label">LOCOMO retrieval-only</div>
+        <div class="sub">Across <b>1,986</b> questions · snap-research/locomo runner.</div>
+      </div>
+      <div class="stat">
+        <span class="num teal" data-count="0.96" data-dec="2">0.00</span>
+        <div class="label">Continuity score</div>
+        <div class="sub"><b>1.00</b> cross-session · 50 scenarios, 6 categories (v0.7.1).</div>
+      </div>
+      <div class="stat">
+        <span class="num" data-count="0.21" data-dec="2">0.00</span><span class="unit">ms</span>
+        <div class="label">Per-memory write</div>
+        <div class="sub">INSERT + FTS5 sync · 10,000 writes in 2.13 s.</div>
+      </div>
+      <div class="stat">
+        <span class="num" data-count="7.17" data-dec="2">0.00</span><span class="unit">ms</span>
+        <div class="label">Search p50 · 10K corpus</div>
+        <div class="sub">FTS5 BM25, 2-token query · p95 18.4 ms.</div>
+      </div>
+      <div class="stat">
+        <span class="num teal" data-count="1.20" data-dec="2">0.00</span><span class="unit">ms</span>
+        <div class="label">Wrapper overhead</div>
+        <div class="sub">Just <b>0.24%</b> at realistic model latency — observability is free.</div>
+      </div>
+      <div class="stat">
+        <span class="num gold" data-count="6" data-suffix="/6">0/6</span>
+        <div class="label">Identity slips rewritten</div>
+        <div class="sub">4-layer lock vs. a 40-prompt jailbreak suite.</div>
+      </div>
+    </div>
+
+    <p class="bench-note">Reproduce any of these yourself: <code>python3 tests/test_all.py</code> · <code>bash test-harness.sh</code> · <code>mnemosyne-continuity run</code>. Throughput measured single-thread on a Linux sandbox; your hardware will vary. Full methodology in <a href="https://github.com/atxgreene/Mnemosyne/blob/main/docs/BENCHMARKS.md" target="_blank" rel="noopener">docs/BENCHMARKS.md</a>.</p>
+  </div>
+</section>
+
+<!-- ───────────────── HERMES ───────────────── -->
+<section id="hermes">
+  <div class="wrap reveal">
+    <div class="eyebrow">The Hermes Plugin</div>
+    <h2>A drop-in memory provider for Hermes Agent.</h2>
+    <p class="lede">Plug the full six-tier ICMS into any <a href="https://hermes-agent.nousresearch.com" target="_blank" rel="noopener">Hermes Agent</a> (Nous Research) as its persistent backend. One SQLite file. No API keys, no vector DB, no cloud. <em>Demonstrated, not aspirational</em> — validated end-to-end on a live runtime.</p>
+
+    <div class="hermes-grid">
+      <div class="terminal" id="hermesTerm">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">hermes · v0.16.0 · runtime validation</span></div>
+        <div class="term-body" id="termBody"></div>
+      </div>
+      <div class="hermes-copy">
+        <h3>Three tools. Zero ceremony.</h3>
+        <p>Turns persist automatically through a single-writer SQLite queue — the agent loop is never blocked. Session-end hooks run salient extraction, writing facts, preferences, and goals up-tier.</p>
+        <table class="tool-table">
+          <tr><td>memory_search(query, limit)</td><td>FTS5 BM25 + strength-weighted retrieval across all tiers</td></tr>
+          <tr><td>memory_write(content, kind, tier)</td><td>store fact / preference / goal / pattern at tier 2–5</td></tr>
+          <tr><td>memory_stats()</td><td>direct SQLite per-tier row counts</td></tr>
+        </table>
+        <div class="badge-row">
+          <span class="vbadge">✓ Local SQLite core</span>
+          <span class="vbadge">✓ ACT-R decay</span>
+          <span class="vbadge">✓ Hebbian strength</span>
+          <span class="vbadge">✓ Offline dreams</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────── ARCHITECTURE ───────────────── -->
+<section id="architecture">
+  <div class="wrap reveal">
+    <div class="eyebrow">ICMS · Six-Tier Cognitive Memory</div>
+    <h2>Not a flat fact store. A mind with tiers.</h2>
+    <p class="lede">Memories carry tier semantics — working context vs. long-term vs. consolidated patterns vs. human-approved identity — with promotion, decay, and a distilled fast-path reflex cache. Hover a tier.</p>
+
+    <div class="tiers">
+      <div class="tier"><span class="bar" style="background:#7dd3d3"></span><span class="tid" style="color:#7dd3d3">L0</span><div><div class="tname">INSTINCT</div><div class="tdesc">Distilled fast-path reflex cache — always checked first</div></div><span class="tflow" style="color:#7dd3d3">▓▓▓</span></div>
+      <div class="tier"><span class="bar" style="background:#9af0ec"></span><span class="tid" style="color:#9af0ec">L1</span><div><div class="tname">HOT</div><div class="tdesc">Working context — current session, selected slice</div></div><span class="tflow" style="color:#9af0ec">▓▓░</span></div>
+      <div class="tier"><span class="bar" style="background:#e8b97e"></span><span class="tid" style="color:#e8b97e">L2</span><div><div class="tname">WARM</div><div class="tdesc">Short-term — default for new writes, feeds dream consolidation</div></div><span class="tflow" style="color:#e8b97e">▓▒░</span></div>
+      <div class="tier"><span class="bar" style="background:#d4601f"></span><span class="tid" style="color:#d4601f">L3</span><div><div class="tname">COLD</div><div class="tdesc">Long-term — demoted from L2, TF-IDF clustering target</div></div><span class="tflow" style="color:#d4601f">▒░░</span></div>
+      <div class="tier"><span class="bar" style="background:#9d7bd8"></span><span class="tid" style="color:#9d7bd8">L4</span><div><div class="tname">PATTERN</div><div class="tdesc">Consolidated patterns — promoted by the compactor, + user_instinct overlay</div></div><span class="tflow" style="color:#9d7bd8">◆◇◇</span></div>
+      <div class="tier"><span class="bar" style="background:#d8b35a"></span><span class="tid" style="color:#d8b35a">L5</span><div><div class="tname">IDENTITY</div><div class="tdesc">Human-approved core values — the 4-layer lock the agent never breaks</div></div><span class="tflow" style="color:#d8b35a">★★★</span></div>
+    </div>
+
+    <div class="arch-img">
+      <img src="assets/mnemosyne-arch.PNG" alt="Mnemosyne system architecture: Channels to Brain to Tool Executor, six-tier ICMS, inner dialogue, dream consolidation, and the Meta-Harness self-improvement loop">
+      <div class="arch-cap">Channels → Brain (context assembly + identity lock) → Tool Executor + 19-provider backend · Inner Dialogue (Planner / Critic / Doer / Evaluator) · Dream Consolidation · the closed Meta-Harness loop.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────── DASHBOARD ───────────────── -->
+<section id="dashboard">
+  <div class="wrap reveal">
+    <div class="eyebrow">Observability</div>
+    <h2>An avatar that visualizes its own mind.</h2>
+    <div class="dash-grid">
+      <div class="dash-shot"><img src="assets/dashboard.png" alt="Mnemosyne live dashboard — avatar, chat, event stream, goals, and a memory browser across all tiers"></div>
+      <div>
+        <ul class="feat-list">
+          <li><span class="fi">◐</span><div><b>29 derived traits, all observable</b><span>Every visual property of the SVG avatar maps to one number — no opaque personality engine.</span></div></li>
+          <li><span class="fi">▤</span><div><b>Memory browser across all tiers</b><span>FTS5 search over L1–L5, live per-tier row counts, goals that persist across sessions.</span></div></li>
+          <li><span class="fi">⟳</span><div><b>Real-time event stream</b><span>memory_write, tool_call, persona_call — every action logged and inspectable.</span></div></li>
+          <li><span class="fi">⌂</span><div><b>Survivable data</b><span><code>sqlite3 memory.db "SELECT content FROM memories"</code> works with the framework gone.</span></div></li>
+        </ul>
+        <a class="btn btn-ghost" href="https://github.com/atxgreene/Mnemosyne/blob/main/docs/UI.md" target="_blank" rel="noopener" style="margin-top:6px">The avatar's visual contract ↗</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────── RESEARCH ───────────────── -->
+<section id="research">
+  <div class="wrap reveal">
+    <div class="eyebrow">Foundations</div>
+    <h2>Standing on real research.</h2>
+    <p class="lede">Mnemosyne is engineering, not mysticism — every mechanism traces to a paper. The honest split of shipped vs. experimental vs. research lives in <a href="https://github.com/atxgreene/Mnemosyne/blob/main/docs/ROADMAP.md" target="_blank" rel="noopener">ROADMAP.md</a>.</p>
+
+    <div class="papers">
+      <div class="paper">
+        <div class="ptag">Preprint · Mnemosyne</div>
+        <h4>A Cognitive OS for Local-First Agents</h4>
+        <p>The architecture writeup: ICMS tiers, the Reflection → Instinct loop, the Meta-Harness, and the eval contract behind every number on this page.</p>
+        <a class="plink" href="https://github.com/atxgreene/Mnemosyne/tree/main/docs" target="_blank" rel="noopener">Read the docs</a>
+      </div>
+      <div class="paper">
+        <div class="ptag">Benchmark · 2024</div>
+        <h4>LOCOMO — Very Long-Term Conversational Memory</h4>
+        <p>Maharana et al. The 10-conversation, ~1,986-question benchmark Mnemosyne's retrieval runner targets, with recorded baselines.</p>
+        <a class="plink" href="https://arxiv.org/abs/2402.17753" target="_blank" rel="noopener">arXiv:2402.17753</a>
+      </div>
+      <div class="paper">
+        <div class="ptag">Cognitive Science</div>
+        <h4>ACT-R — The Adaptive Character of Thought</h4>
+        <p>Anderson et al. The activation-decay model behind Mnemosyne's per-kind memory decay and Hebbian strength reinforcement.</p>
+        <a class="plink" href="http://act-r.psy.cmu.edu/" target="_blank" rel="noopener">act-r.psy.cmu.edu</a>
+      </div>
+      <div class="paper">
+        <div class="ptag">Interpretability · Roadmap</div>
+        <h4>Neural Geometry &amp; Concept Manifolds</h4>
+        <p>Goodfire's manifold work guides the eval-gated roadmap for L4 pattern memory — preserving relational structure, not just flat abstracts.</p>
+        <a class="plink" href="https://www.goodfire.ai/research" target="_blank" rel="noopener">goodfire.ai/research</a>
+      </div>
+      <div class="paper">
+        <div class="ptag">Runtime · Nous Research</div>
+        <h4>Hermes Agent</h4>
+        <p>The agent framework Mnemosyne validates against as a drop-in MemoryProvider — discovery, tool routing, and the plugin manifest.</p>
+        <a class="plink" href="https://hermes-agent.nousresearch.com" target="_blank" rel="noopener">hermes-agent.nousresearch.com</a>
+      </div>
+      <div class="paper">
+        <div class="ptag">Reproduce</div>
+        <h4>The Eval Harness</h4>
+        <p>Retrieval probe set, the full LOCOMO runner with LM Studio + Mem0 adapters, and the <code>check_regression.py</code> gate — in the lab repo.</p>
+        <a class="plink" href="https://github.com/atxgreene/mnemosyne-lab" target="_blank" rel="noopener">atxgreene/mnemosyne-lab</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────── X ARTICLE ───────────────── -->
+<section id="field">
+  <div class="wrap reveal">
+    <div class="eyebrow">From the Field</div>
+    <h2>Written up on 𝕏.</h2>
+    <div class="x-wrap">
+      <!-- LIVE EMBED SLOT: paste the tweet/article URL and the official X blockquote drops in here.
+           Replace the .x-card below with:
+           <blockquote class="twitter-tweet" data-theme="dark"><a href="PASTE_X_URL"></a></blockquote>
+           widgets.js is already loaded at the bottom of the page. -->
+      <div class="x-card">
+        <div class="x-head">
+          <div class="x-av">M</div>
+          <div><div class="x-name">Mnemosyne</div><div class="x-handle">@atxgreene</div></div>
+        </div>
+        <div class="x-body">"I built a brain for my AI agent — a six-tier memory that flows <span class="hl">both directions</span>, runs entirely local, and survives as plain SQLite. Here's what I learned."</div>
+        <div class="x-foot"><span>↻ Repost</span><span>♥ Like</span><span>↗ Share</span></div>
+      </div>
+      <div class="x-slot-note">⌁ Embed slot ready — paste your X article URL in chat and the live post drops in right here, with this card as the styled fallback.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────── INSTALL ───────────────── -->
+<section id="install">
+  <div class="wrap reveal">
+    <div class="eyebrow">Quickstart</div>
+    <h2>Ten lines to a first conversation.</h2>
+    <div class="install-box">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">bash · ~/projects/mnemosyne</span></div>
+      <div class="code"><span class="c"># zero runtime deps — this pulls nothing from PyPI</span>
+<span class="p">$</span> <span class="k">pip install</span> mnemosyne-harness
+<span class="p">$</span> <span class="k">mnemosyne-serve</span> &amp;                      <span class="c"># daemon + dashboard</span>
+<span class="p">$</span> <span class="k">open</span> http://127.0.0.1:8484/ui          <span class="c"># avatar evolves in real time</span>
+
+<span class="c"># or drop it into Hermes as a memory provider:</span>
+<span class="p">$</span> <span class="k">hermes plugins enable</span> mnemosyne
+<span class="p">$</span> <span class="k">hermes plugins list</span>     <span class="o">→ enabled  user  0.1.0  mnemosyne</span></div>
+    </div>
+    <div class="verify-row">
+      <span class="chip">Verify: <b>python3 tests/test_all.py</b></span>
+      <span class="chip">E2E: <b>bash test-harness.sh</b></span>
+      <span class="chip">Demo: <b>./demo.sh</b></span>
+    </div>
+    <div class="hero-cta" style="justify-content:flex-start; animation:none; opacity:1">
+      <a class="btn btn-primary" href="https://github.com/atxgreene/Mnemosyne" target="_blank" rel="noopener">★ Star on GitHub ↗</a>
+      <a class="btn btn-ghost" href="https://github.com/atxgreene/Mnemosyne/blob/main/docs/QUICKSTART.md" target="_blank" rel="noopener">Quickstart guide ↗</a>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────── FOOTER ───────────────── -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <div class="brand"><svg class="hex" viewBox="0 0 100 100"><polygon points="50,6 88,28 88,72 50,94 12,72 12,28" fill="none" stroke="#7dd3d3" stroke-width="4"/><polygon points="50,30 68,42 68,64 50,76 32,64 32,42" fill="none" stroke="#d8b35a" stroke-width="3"/><circle cx="50" cy="53" r="6" fill="#7dd3d3"/></svg> MNEMOSYNE</div>
+        <p>A cognitive OS for local-first agents. Stdlib-only core. Your knowledge survives without the framework. <b>Not AGI</b> — honest engineering primitives.</p>
+      </div>
+      <div class="foot-col">
+        <h5>Project</h5>
+        <a href="https://github.com/atxgreene/Mnemosyne" target="_blank" rel="noopener">Mnemosyne</a>
+        <a href="https://github.com/atxgreene/eternal-context" target="_blank" rel="noopener">eternal-context</a>
+        <a href="https://github.com/atxgreene/fantastic-disco" target="_blank" rel="noopener">fantastic-disco</a>
+        <a href="https://github.com/atxgreene/mnemosyne-lab" target="_blank" rel="noopener">mnemosyne-lab</a>
+      </div>
+      <div class="foot-col">
+        <h5>Docs</h5>
+        <a href="https://github.com/atxgreene/Mnemosyne/blob/main/docs/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a>
+        <a href="https://github.com/atxgreene/Mnemosyne/blob/main/docs/HERMES.md" target="_blank" rel="noopener">Hermes integration</a>
+        <a href="https://github.com/atxgreene/Mnemosyne/blob/main/docs/BENCHMARKS.md" target="_blank" rel="noopener">Benchmarks</a>
+        <a href="https://github.com/atxgreene/Mnemosyne/blob/main/docs/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>⬡ Mnemosyne · built local-first by @atxgreene</span>
+      <span>SQLite + JSONL + Markdown · the knowledge is yours</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ── Hero generative unicode glyph field ───────────── */
+(function(){
+  const cv = document.getElementById('glyphCanvas');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let W,H,cols,drops,fontSize=18;
+  const glyphs = '𓂀𓁟𓃰𓅓𓆣𓎟𓏏░▒▓│┃║╬◆◇★☆⬡⬢◊∴⟳↑↓0123ʘΨΦΩλΣ'.split('');
+  function resize(){
+    W=cv.width=cv.offsetWidth; H=cv.height=cv.offsetHeight;
+    cols=Math.floor(W/fontSize);
+    drops=Array.from({length:cols},()=>Math.random()*-H);
+  }
+  resize(); window.addEventListener('resize',resize);
+  const palette=['rgba(125,211,211,','rgba(216,179,90,','rgba(154,240,236,','rgba(212,96,31,'];
+  function draw(){
+    ctx.fillStyle='rgba(7,10,15,0.10)';
+    ctx.fillRect(0,0,W,H);
+    ctx.font=fontSize+'px JetBrains Mono, monospace';
+    for(let i=0;i<cols;i++){
+      const g=glyphs[Math.floor(Math.random()*glyphs.length)];
+      const x=i*fontSize, y=drops[i];
+      const c=palette[i%palette.length];
+      ctx.fillStyle=c+(0.18+Math.random()*0.5)+')';
+      ctx.fillText(g,x,y);
+      if(y>H && Math.random()>0.975) drops[i]=Math.random()*-120;
+      drops[i]+=fontSize*0.42;
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ── Scroll reveal ─────────────────────────────────── */
+const ro=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');}})},{threshold:0.12});
+document.querySelectorAll('.reveal').forEach(el=>ro.observe(el));
+
+/* ── Count-up benchmark numbers ────────────────────── */
+function countUp(el){
+  const target=parseFloat(el.dataset.count);
+  const dec=parseInt(el.dataset.dec||'0');
+  const suffix=el.dataset.suffix||'';
+  const dur=1400, t0=performance.now();
+  function step(t){
+    const p=Math.min((t-t0)/dur,1);
+    const e=1-Math.pow(1-p,3);
+    const v=target*e;
+    el.textContent=(dec?v.toFixed(dec):Math.round(v))+suffix;
+    if(p<1) requestAnimationFrame(step);
+    else el.textContent=(dec?target.toFixed(dec):target)+suffix;
+  }
+  requestAnimationFrame(step);
+}
+const co=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){countUp(e.target); co.unobserve(e.target);}})},{threshold:0.5});
+document.querySelectorAll('.stat .num[data-count]').forEach(el=>co.observe(el));
+
+/* ── Hermes terminal typing sequence ───────────────── */
+(function(){
+  const term=document.getElementById('hermesTerm');
+  const body=document.getElementById('termBody');
+  if(!term||!body) return;
+  const lines=[
+    {t:'<span class="term-cmd"><span class="pr">$</span> hermes plugins enable mnemosyne</span>',d:380},
+    {t:'<span class="term-dim">→ discovering memory providers…</span>',d:320},
+    {t:'<span class="term-check">  plugin discovery             </span><span class="term-pass">PASS</span>',d:260},
+    {t:'<span class="term-check">  provider load + availability </span><span class="term-pass">PASS</span>',d:230},
+    {t:'<span class="term-check">  session initialization       </span><span class="term-pass">PASS</span>',d:230},
+    {t:'<span class="term-check">  tool routing · write/search  </span><span class="term-pass">PASS</span>',d:230},
+    {t:'<span class="term-check">  turn persistence → SQLite    </span><span class="term-pass">PASS</span>',d:230},
+    {t:'<span class="term-check">  prefetch (non-blocking)      </span><span class="term-pass">PASS</span>',d:230},
+    {t:'<span class="term-check">  shutdown / queue flush       </span><span class="term-pass">PASS</span>',d:230},
+    {t:'<span class="term-check">  fresh-session recall         </span><span class="term-pass">PASS</span>',d:230},
+    {t:'<span class="term-dim">&nbsp;</span>',d:160},
+    {t:'<span class="term-pass">  ✓ 8/8 checks passed</span> <span class="term-dim">— live Hermes v0.16.0</span>',d:300},
+  ];
+  let started=false;
+  function run(){
+    if(started) return; started=true;
+    let i=0;
+    function next(){
+      if(i>=lines.length) return;
+      const el=document.createElement('div');
+      el.className='term-line'; el.innerHTML=lines[i].t;
+      body.appendChild(el);
+      requestAnimationFrame(()=>el.classList.add('show'));
+      const delay=lines[i].d; i++;
+      setTimeout(next,delay);
+    }
+    next();
+  }
+  const o=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting) run();})},{threshold:0.35});
+  o.observe(term);
+})();
+</script>
+<!-- X widgets loader (active once a real blockquote embed is pasted into #field) -->
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+</body>
+</html>
