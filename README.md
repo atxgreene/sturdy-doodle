@@ -15,6 +15,14 @@
 
 Channels (REST/CLI/Telegram/Slack/Discord/Avatar UI) → Brain (context assembly + identity lock) → Tool Executor + 19-provider Model Backend. ICMS **6-tier memory** (L0 instinct / L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity) with the v0.9 **Reflection → Instinct loop** distilling L5+lower patterns down into L0 fast-path rows. Inner Dialogue (Planner/Critic/Doer/Evaluator), Dream Consolidation, Meta-Harness self-improvement loop. All data lives as plain SQLite + JSONL + Markdown — your knowledge survives without the framework.
 
+## Hermes memory provider — runtime-validated
+
+Mnemosyne ships as a drop-in **memory provider for [Hermes Agent](https://hermes-agent.nousresearch.com)** (Nous Research) — validated end-to-end on a live Hermes v0.16.0 runtime: discovery, tool routing (`memory_search` / `memory_write` / `memory_stats`), turn persistence, prefetch, clean shutdown, and fresh-session chat-loop recall, all passing against local SQLite.
+
+What you get over other memory providers: a fully local stdlib core (no API keys, no vector DB, no cloud), the 6-tier ICMS with decay, Hebbian strength, and promotion semantics instead of a flat fact store, offline dream/consolidation services over the same database, and **published eval-gated benchmarks** (retrieval recall@5 0.8704, LOCOMO baseline recorded, regression-gated).
+
+→ Setup, validation log, benchmarks: [docs/HERMES.md](docs/HERMES.md) · plugin: [integrations/hermes/](integrations/hermes/)
+
 ## Live dashboard
 
 ![dashboard](docs/dashboard.png)

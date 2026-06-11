@@ -1,0 +1,6 @@
+name: mnemosyne
+version: 0.1.0
+description: "Local-first 6-tier ICMS (SQLite FTS5) memory — Mnemosyne ICMS for BEN the Navigator."
+hooks:
+  - on_session_end
+  - on_pre_compress
