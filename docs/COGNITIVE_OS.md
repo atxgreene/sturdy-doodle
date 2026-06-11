@@ -49,7 +49,9 @@ promoted by concept extraction + reinforcement, not just recency.
 False patterns decay; reinforced patterns promote.
 
 **Shipped:**
-- L1 hot / L2 warm / L3 cold (`mnemosyne_memory`)
+- L1 hot / L2 warm / L3 cold base tiers (`mnemosyne_memory`) — since
+  grown to the full 6-tier ICMS (L0 instinct … L5 identity; see the
+  v0.7 entries below for L4/L5)
 - SQLite + FTS5 with `strength` column in schema
 - `mnemosyne_dreams.consolidate()` — L2→L3 concept extraction via
   TF-IDF clustering (optional LLM summarizer)
@@ -72,7 +74,7 @@ False patterns decay; reinforced patterns promote.
 
 **Verify command:**
 ```sh
-mnemosyne-memory stats             # L1-L5 counts
+mnemosyne-memory stats             # L0–L5 counts
 mnemosyne-memory decay             # one ACT-R decay pass
 mnemosyne-compactor run --dry-run  # preview L3 → L4 promotions
 mnemosyne-compactor run            # actually promote

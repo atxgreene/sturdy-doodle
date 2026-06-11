@@ -17,8 +17,8 @@
  *   scars     — small dim arc segments on the rim. One per identity
  *               slip. Visible reminder of past failures; fade with
  *               additional time.
- *   roots     — three downward-extending lines representing L1/L2/L3
- *               memory tier counts.
+ *   roots     — six downward-extending lines representing the L0–L5
+ *               ICMS memory tier counts.
  *   eye       — opens wider on focus, narrows on rest.
  *
  * Mood phase changes the animation ambience:
@@ -92,6 +92,20 @@ function mixHex(a, b, t) {
   const rg = Math.round(ag * (1 - t) + bg * t);
   const rb = Math.round(ab * (1 - t) + bb * t);
   return "#" + [rr, rg, rb].map(n => n.toString(16).padStart(2, "0")).join("");
+}
+
+// Per-tier colours for the 6-tier ICMS (L0 Instinct … L5 Identity),
+// derived from the 4-colour palette so the deterministic palette
+// mapping stays intact. Mirrors _tier_colours in mnemosyne_avatar.py.
+function tierColors(palette) {
+  return [
+    mixHex(palette.accent, "#ffffff", 0.4),    // L0 instinct
+    palette.accent,                             // L1 hot
+    palette.core,                               // L2 warm
+    palette.rim,                                // L3 cold
+    mixHex(palette.core, palette.rim, 0.5),     // L4 pattern
+    mixHex(palette.accent, palette.core, 0.5),  // L5 identity
+  ];
 }
 
 function renderPixelOwl(svg, opts) {
@@ -277,28 +291,33 @@ function buildSvg(state) {
   svg.appendChild(defs);
 
   // ---- habitat: memory-tier terrain at the bottom ----
-  // Three soft wave bands whose heights scale with L1/L2/L3 memory
-  // counts. Thematic grounding for the avatar, not a game background.
-  const totalMem = state.l1_count + state.l2_count + state.l3_count;
+  // Six soft wave bands, one per ICMS tier (L0–L5), heights scaled by
+  // each tier's share of total memories. Deeper bands map to the
+  // longer-term tiers. Thematic grounding, not a game background.
+  const tierCounts = [
+    state.l0_count || 0, state.l1_count || 0, state.l2_count || 0,
+    state.l3_count || 0, state.l4_count || 0, state.l5_count || 0,
+  ];
+  const tierCols = tierColors(palette);
+  const totalMem = tierCounts.reduce((a, b) => a + b, 0);
   if (totalMem > 0) {
     const habH = 100;
-    const l1H = Math.min(habH * 0.50, (state.l1_count / totalMem) * habH * 0.9);
-    const l2H = Math.min(habH * 0.70, (state.l2_count / totalMem) * habH * 0.9);
-    const l3H = Math.min(habH * 0.90, (state.l3_count / totalMem) * habH * 0.9);
     const W = AVATAR_VIEWBOX, H = AVATAR_VIEWBOX;
     const wave = (h, amp) =>
       `M0,${H} L0,${H - h} Q${W * 0.3},${H - h - amp}`
       + ` ${W * 0.5},${H - h - amp / 2}`
       + ` T${W},${H - h} L${W},${H} Z`;
-    svg.appendChild(el("path", {
-      d: wave(l3H, 12), fill: palette.rim, "fill-opacity": 0.10,
-    }));
-    svg.appendChild(el("path", {
-      d: wave(l2H, 8), fill: palette.core, "fill-opacity": 0.12,
-    }));
-    svg.appendChild(el("path", {
-      d: wave(l1H, 6), fill: palette.accent, "fill-opacity": 0.15,
-    }));
+    // Deepest (L5) drawn first so shallower bands layer in front.
+    for (let tier = 5; tier >= 0; tier--) {
+      if (tierCounts[tier] === 0) continue;
+      const cap = habH * (0.40 + tier * 0.10);
+      const h = Math.min(cap, (tierCounts[tier] / totalMem) * habH * 0.9);
+      svg.appendChild(el("path", {
+        d: wave(h, 4 + tier * 2),
+        fill: tierCols[tier],
+        "fill-opacity": (0.17 - tier * 0.015).toFixed(3),
+      }));
+    }
   }
 
   // ---- wisdom ring (very outer, subtle — appears only when measured) ----
@@ -456,26 +475,21 @@ function buildSvg(state) {
     }));
   }
 
-  // ---- memory roots (three downward lines, length proportional to tier counts) ----
-  const tiers = [
-    { count: state.l1_count, color: palette.accent, x: cx - 20 },
-    { count: state.l2_count, color: palette.core,   x: cx },
-    { count: state.l3_count, color: palette.rim,    x: cx + 20 },
-  ];
+  // ---- memory roots (six downward lines, one per tier L0–L5, length ∝ count) ----
   const rootBase = cy + (60 + state.health * 12) - 4;
   const maxRoot = 110;
-  for (const t of tiers) {
-    const len = clip(20 + Math.log10(1 + t.count) * 30, 20, maxRoot);
-    const root = el("line", {
-      x1: t.x, y1: rootBase,
-      x2: t.x, y2: rootBase + len,
-      stroke: t.color,
+  tierCounts.forEach((count, tier) => {
+    const x = cx - 50 + tier * 20;
+    const len = clip(20 + Math.log10(1 + count) * 30, 20, maxRoot);
+    svg.appendChild(el("line", {
+      x1: x, y1: rootBase,
+      x2: x, y2: rootBase + len,
+      stroke: tierCols[tier],
       "stroke-opacity": 0.55,
       "stroke-width": 2,
       "stroke-linecap": "round",
-    });
-    svg.appendChild(root);
-  }
+    }));
+  });
 
   // ---- consolidate-mode petals (only on dream cadence) ----
   if (state.mood_phase === "consolidate" && state.dreams_count > 0) {

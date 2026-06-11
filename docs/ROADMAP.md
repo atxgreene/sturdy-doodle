@@ -19,7 +19,7 @@ install -e . && ./demo.sh` on a fresh laptop?" If yes, it's verifiable.
 | Parameter sweeps + Pareto analysis | `harness_sweep`, `mnemosyne_experiments` | 10+ tests, sweep_demo |
 | Scenario runner with expectations DSL | `scenario_runner`, `scenarios.example.jsonl` | 8+ tests |
 | Environment snapshot (first-turn context) | `environment_snapshot` | integration test |
-| SQLite+FTS5 memory with L1/L2/L3 tiers | `mnemosyne_memory` | 12+ tests |
+| SQLite+FTS5 memory with the 6-tier ICMS (L0–L5) | `mnemosyne_memory` | 12+ tests |
 | Model backend (19 providers, stdlib-only) | `mnemosyne_models` | 8+ tests (mocked HTTP) |
 | Skill registry (agentskills.io-compatible) | `mnemosyne_skills` | 10+ tests |
 | 4-layer identity lock + audit mode | `mnemosyne_identity` | 15+ tests, demo rewrites "I am Claude" → "I am Mnemosyne" |

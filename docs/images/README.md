@@ -9,7 +9,7 @@ paths below.
 | Filename | Purpose | Status |
 |---|---|---|
 | `hero-owl-banner.png` | README header banner. Mayan-styled owl + hexagonal core orb on temple background. Tagline: "Cognitive OS for Local-First AI Agents". | Save your `Mnemosyne` hero banner here |
-| `architecture-overview.png` | Full system diagram: Channels → Brain → Tool Executor + ICMS 5-tier memory + Inner Dialogue + Dream Consolidation + Meta-Harness loop + Telemetry. Used in `docs/articles/v0.8-launch-substack.md` and embedded in README under "Architecture at a glance". | Save your `Mnemosyne Agent Architecture` diagram here |
+| `architecture-overview.png` | Full system diagram: Channels → Brain → Tool Executor + ICMS memory stack + Inner Dialogue + Dream Consolidation + Meta-Harness loop + Telemetry. Pre-v0.9 render — shows L1–L5 without the L0 Instinct tier; see "Known image issues" below. Used in `docs/articles/v0.8-launch-substack.md` and embedded in README under "Architecture at a glance". | Save your `Mnemosyne Agent Architecture` diagram here |
 | `owl-portrait.png` | Square avatar / quote-card visual. Detailed owl head with hieroglyph border, teal eyes, dark slate. | Save your owl portrait here |
 | `architecture-tier-stack.png` | **DO NOT USE as canonical architecture doc** — see "Known image issues" below. | Save here only if you want to use it for marketing-only contexts with the caveat noted. |
 
@@ -38,17 +38,19 @@ L5=meta-memory" because of ambiguous earlier docs).
 
 **Two options if you want to use this aesthetic:**
 
-1. Re-render the diagram against the actual L1-L5 layout shown in
-   `docs/ARCHITECTURE.md`. Keep the visual style (ancient stone slabs,
-   teal/orange palette, hieroglyph border). Just relabel:
+1. Re-render the diagram against the actual L0–L5 layout shown in
+   `docs/ARCHITECTURE.md` (six tiers only — there is no L6; reflection
+   is a process, not a tier). Keep the visual style (ancient stone
+   slabs, teal/orange palette, hieroglyph border). Just relabel:
+   - L0: Instinct (fast-path, distilled by the Reflection → Instinct loop)
    - L1: Hot (Working Memory)
    - L2: Warm (Short-Term)
    - L3: Cold (Long-Term)
-   - L4: Pattern (+ user_instinct overlay)
+   - L4: Pattern (compactor output)
    - L5: Identity (Human-Approved Core Values)
 2. Use it in marketing-only contexts (a Substack header image,
    Instagram, etc.) with a caption: *"Conceptual rendering — see
-   docs/ARCHITECTURE.md for the canonical L1-L5 layout."*
+   docs/ARCHITECTURE.md for the canonical L0–L5 layout."*
 
 The aesthetic is great. The labels just need to match the code.
 
@@ -58,10 +60,12 @@ The big system diagram says "L4 Dreams consolidation" in the ICMS
 panel. Strictly speaking, our L4 holds **patterns** (rows promoted by
 `mnemosyne_compactor`); dream consolidation is the offline process
 that produces them. Not wrong enough to reject — most readers will
-read "Dreams" as the source of L4 content and understand. If you
-re-render in the future, label it "L4 Pattern (compactor)" and add
-the "Dream Consolidation" arrow flowing INTO it rather than naming
-the tier after the process.
+read "Dreams" as the source of L4 content and understand. The render
+also predates v0.9, so the stack shows five tiers — L0 Instinct is
+missing. If you re-render in the future, add L0 at the bottom, label
+the pattern tier "L4 Pattern (compactor)", and add the "Dream
+Consolidation" arrow flowing INTO it rather than naming the tier
+after the process.
 
 ## Format guidance
 

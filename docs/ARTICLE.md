@@ -132,7 +132,7 @@ independently testable, and none of them depend on the layers above.
   mnemosyne_tool_parsers — Hermes/Mistral/Llama-3 inline tool calls
 ```
 
-### Memory: the 3-to-5 tier hierarchy
+### Memory: the 3-to-6 tier hierarchy
 
 The memory module started with a three-tier design borrowed from
 `eternal-context`'s ICMS (Identity-Consistent Memory System):
@@ -163,6 +163,12 @@ Upward promotion is the key mechanism. A pattern that holds for
 90 days with high retrieval frequency gets promoted to identity —
 but always via human review, never autonomously. We don't want
 agents rewriting their own souls.
+
+(v0.9 later completed the stack with a sixth tier *below* L1:
+**L0 instinct**, a fast-path reflex cache distilled offline from the
+higher tiers by the Reflection → Instinct loop. Six tiers, L0–L5, is
+the full set — reflection itself is a process, not a tier. See
+`docs/ARCHITECTURE.md` for the canonical table.)
 
 The north-star test for this work is the **Continuity Score**: ask
 the agent 50 identity questions, capture answers as baseline, wipe

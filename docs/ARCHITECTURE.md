@@ -201,7 +201,7 @@ The system draws on Atkinson–Shiffrin (multi-store) and ACT-R (base-level acti
 
 ### The DeltaNet inflection point
 
-Standard multi-head attention scales quadratically with context length: O(n^2) in both compute and memory. For an ICMS system that needs to maintain long retrieval contexts (Mnemosyne's L1/L2/L3 tiers), this means the context window is a hard ceiling on how much the agent can "remember" per turn.
+Standard multi-head attention scales quadratically with context length: O(n^2) in both compute and memory. For an ICMS system that needs to maintain long retrieval contexts (Mnemosyne's L0–L5 tiers), this means the context window is a hard ceiling on how much the agent can "remember" per turn.
 
 DeltaNet (and its gated variant) replaces attention with a learned recurrence that scales **linearly** with context: O(n). The state is a fixed-size matrix that gets updated token-by-token via the delta rule. Retrieval from this state is approximate but fast.
 

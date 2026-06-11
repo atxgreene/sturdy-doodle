@@ -32,7 +32,8 @@ Computed traits (v1 schema)
     epoch                : monotonically increasing tick counter
     age_days             : days since first memory write
     memory_count         : total rows in memories table
-    l1_count, l2_count, l3_count : per-tier counts
+    l0_count … l5_count  : per-tier counts (full 6-tier ICMS,
+                           L0 Instinct through L5 Identity)
     skills_count         : registered skills (incl. learned)
     learned_skills       : skills written via record_learned_skill
     goals_open           : open goal count
@@ -850,6 +851,35 @@ def _render_pixel_owl(
     return parts
 
 
+def _mix_hex(a: str, b: str, t: float) -> str:
+    """Linear blend of two #rrggbb colours; returns `a` unchanged when
+    either input isn't a 6-digit hex string."""
+    import re as _re
+    if not (_re.fullmatch(r"#[0-9a-fA-F]{6}", a)
+            and _re.fullmatch(r"#[0-9a-fA-F]{6}", b)):
+        return a
+    av = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    bv = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(
+        f"{round(x * (1 - t) + y * t):02x}" for x, y in zip(av, bv))
+
+
+def _tier_colours(palette: dict[str, str]) -> list[str]:
+    """Per-tier colours for the 6-tier ICMS (L0 Instinct … L5 Identity),
+    derived from the 4-colour palette so the deterministic palette
+    mapping stays intact. Mirrors `tierColors` in
+    `mnemosyne_ui/static/avatar.js`."""
+    accent, core, rim = palette["accent"], palette["core"], palette["rim"]
+    return [
+        _mix_hex(accent, "#ffffff", 0.4),  # L0 instinct
+        accent,                             # L1 hot
+        core,                               # L2 warm
+        rim,                                # L3 cold
+        _mix_hex(core, rim, 0.5),           # L4 pattern
+        _mix_hex(accent, core, 0.5),        # L5 identity
+    ]
+
+
 def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
     """Server-side SVG render — mirrors the JS renderer in
     `mnemosyne_ui/static/avatar.js`. Useful for docs screenshots and
@@ -907,14 +937,14 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
     parts.append(f'<rect x="0" y="0" width="{size}" height="{size}" '
                   f'fill="{bg}"/>')
 
-    # Habitat: three memory-tier wave bands
-    total_mem = (int(state.get("l1_count", 0)) + int(state.get("l2_count", 0))
-                   + int(state.get("l3_count", 0)))
+    # Habitat: six memory-tier wave bands, one per ICMS tier (L0–L5),
+    # heights scaled by each tier's share of total memories. Deeper
+    # bands map to the longer-term tiers.
+    tier_counts = [int(state.get(f"l{i}_count", 0)) for i in range(6)]
+    tier_cols = _tier_colours(palette)
+    total_mem = sum(tier_counts)
     if total_mem > 0:
         hab = 100.0
-        l1h = min(hab * 0.50, (state["l1_count"] / total_mem) * hab * 0.9)
-        l2h = min(hab * 0.70, (state["l2_count"] / total_mem) * hab * 0.9)
-        l3h = min(hab * 0.90, (state["l3_count"] / total_mem) * hab * 0.9)
 
         def wave(h: float, amp: float) -> str:
             return (f"M0,{size} L0,{size - h:.1f} "
@@ -922,12 +952,15 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
                     f"{size*0.5:.1f},{size - h - amp/2:.1f} "
                     f"T{size},{size - h:.1f} L{size},{size} Z")
 
-        parts.append(f'<path d="{wave(l3h, 12)}" fill="{rim}" '
-                      f'fill-opacity="0.10"/>')
-        parts.append(f'<path d="{wave(l2h, 8)}" fill="{core}" '
-                      f'fill-opacity="0.12"/>')
-        parts.append(f'<path d="{wave(l1h, 6)}" fill="{accent}" '
-                      f'fill-opacity="0.15"/>')
+        # Deepest (L5) drawn first so shallower bands layer in front.
+        for tier in range(5, -1, -1):
+            if tier_counts[tier] == 0:
+                continue
+            cap = hab * (0.40 + tier * 0.10)
+            h = min(cap, (tier_counts[tier] / total_mem) * hab * 0.9)
+            parts.append(f'<path d="{wave(h, 4 + tier * 2)}" '
+                          f'fill="{tier_cols[tier]}" '
+                          f'fill-opacity="{0.17 - tier * 0.015:.3f}"/>')
 
     # Aura
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="{aura_r * 1.55:.1f}" '
@@ -1019,18 +1052,15 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
                       f'stroke="#f25c6f" stroke-opacity="0.45" '
                       f'stroke-width="1.6" stroke-linecap="round"/>')
 
-    # Memory roots
-    tiers = [
-        (state.get("l1_count", 0), accent, cx - 20),
-        (state.get("l2_count", 0), core,   cx),
-        (state.get("l3_count", 0), rim,    cx + 20),
-    ]
+    # Memory roots — six downward lines, one per tier L0–L5,
+    # length proportional to log tier count.
     root_base = cy + core_r - 4
-    for count, colour, x in tiers:
+    for tier, count in enumerate(tier_counts):
+        x = cx - 50 + tier * 20
         length = max(20, min(110, 20 + _math.log10(1 + count) * 30))
-        parts.append(f'<line x1="{x}" y1="{root_base:.1f}" '
-                      f'x2="{x}" y2="{root_base + length:.1f}" '
-                      f'stroke="{colour}" stroke-opacity="0.55" '
+        parts.append(f'<line x1="{x:.1f}" y1="{root_base:.1f}" '
+                      f'x2="{x:.1f}" y2="{root_base + length:.1f}" '
+                      f'stroke="{tier_cols[tier]}" stroke-opacity="0.55" '
                       f'stroke-width="2" stroke-linecap="round"/>')
 
     parts.append('</svg>')

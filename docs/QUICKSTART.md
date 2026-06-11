@@ -69,8 +69,9 @@ You ran a stdlib-only daemon that:
 3. **Computed avatar state** deterministically from observable signals.
    No magic — every visual property maps to a number you can grep out of
    `~/projects/mnemosyne/avatar.json`.
-4. **Stored the turn** in a SQLite + FTS5 memory store with a 3-tier
-   policy (L1 hot / L2 warm / L3 cold). Searchable from the dashboard's
+4. **Stored the turn** in a SQLite + FTS5 memory store with the
+   6-tier ICMS policy (L0 instinct / L1 hot / L2 warm / L3 cold /
+   L4 pattern / L5 identity). Searchable from the dashboard's
    memory browser panel.
 
 ## Common next moves

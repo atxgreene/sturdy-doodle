@@ -1,12 +1,13 @@
 """
-mnemosyne_memory.py — SQLite+FTS5 memory with ICMS 3-tier integration.
+mnemosyne_memory.py — SQLite+FTS5 memory with 6-tier ICMS integration.
 
 Purpose
 -------
 Provides the persistent memory layer for Mnemosyne. Matches the expressive
 power of Hermes's hermes_state.py (SQLite + FTS5 full-text search) while
-integrating natively with eternal-context's ICMS 3-tier memory model (L1 hot,
-L2 warm, L3 cold). Every memory row carries a `tier` column; promotion and
+implementing the full 6-tier ICMS memory model (L0 instinct, L1 hot,
+L2 warm, L3 cold, L4 pattern, L5 identity — six tiers only, nothing
+above L5). Every memory row carries a `tier` column; promotion and
 eviction are explicit operations the brain can issue.
 
 Design choices

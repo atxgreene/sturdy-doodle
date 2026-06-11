@@ -85,11 +85,11 @@ head2 'environment-snapshot  (human-readable markdown)'
 environment-snapshot --projects-dir "$DEMO_PROJECTS" 2>&1 | head -30
 
 # ==============================================================================
-head1 '4/18  Memory layer — SQLite+FTS5 with ICMS 3-tier'
+head1 '4/18  Memory layer — SQLite+FTS5 with 6-tier ICMS (L0–L5)'
 # ==============================================================================
 MEM_DB="$DEMO_PROJECTS/memory.db"
 
-head2 'Writing 4 memories across all three tiers'
+head2 'Writing 4 memories across tiers L1–L3'
 mnemosyne-memory --db "$MEM_DB" write "User prefers gemma4:e4b as default model" --kind preference --tier 1
 mnemosyne-memory --db "$MEM_DB" write "Project alpha uses rust and tokio" --kind project --tier 2
 mnemosyne-memory --db "$MEM_DB" write "Old fact: python pre-2026 had no DeltaNet support" --kind fact --tier 3

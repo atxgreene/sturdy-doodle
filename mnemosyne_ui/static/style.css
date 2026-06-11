@@ -358,9 +358,12 @@ button:disabled { opacity: 0.5; cursor: wait; }
   border-radius: 999px;
   transition: width 0.6s ease;
 }
+.memory-row.l0 .bar > span { background: color-mix(in srgb, var(--accent) 55%, #ffffff); }
 .memory-row.l1 .bar > span { background: var(--accent); }
 .memory-row.l2 .bar > span { background: var(--core); }
 .memory-row.l3 .bar > span { background: var(--rim); opacity: 0.6; }
+.memory-row.l4 .bar > span { background: color-mix(in srgb, var(--core) 55%, var(--rim)); }
+.memory-row.l5 .bar > span { background: color-mix(in srgb, var(--accent) 45%, var(--core)); }
 
 .memory-numbers {
   margin-top: 10px;
@@ -468,9 +471,12 @@ button:disabled { opacity: 0.5; cursor: wait; }
   background: var(--pill-bg);
   color: var(--text-dim);
 }
+.mb-results li .mb-tier.t0 { color: color-mix(in srgb, var(--accent) 55%, #ffffff); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .mb-results li .mb-tier.t1 { color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .mb-results li .mb-tier.t2 { color: var(--core); border: 1px solid color-mix(in srgb, var(--core) 40%, transparent); }
 .mb-results li .mb-tier.t3 { color: var(--rim); border: 1px solid color-mix(in srgb, var(--rim) 40%, transparent); opacity: 0.8; }
+.mb-results li .mb-tier.t4 { color: color-mix(in srgb, var(--core) 55%, var(--rim)); border: 1px solid color-mix(in srgb, var(--core) 40%, transparent); }
+.mb-results li .mb-tier.t5 { color: color-mix(in srgb, var(--accent) 45%, var(--core)); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .mb-results li .mb-kind {
   color: var(--text-dim);
   font-size: 11px;

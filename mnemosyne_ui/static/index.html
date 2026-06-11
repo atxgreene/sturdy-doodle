@@ -92,7 +92,7 @@
     <!-- memory -->
     <section class="panel panel-memory">
       <h2>Memory tiers
-        <span class="hint">L1 hot · L2 warm · L3 cold</span>
+        <span class="hint">L0 instinct · L1 hot · L2 warm · L3 cold · L4 pattern · L5 identity</span>
       </h2>
       <div class="memory-bars" id="memory-bars"></div>
       <div class="memory-numbers" id="memory-numbers"></div>
@@ -101,17 +101,19 @@
     <!-- memory browser -->
     <section class="panel panel-membrowse">
       <h2>Memory browser
-        <span class="hint">FTS5 search across all memory tiers</span>
+        <span class="hint">FTS5 search across all six memory tiers</span>
       </h2>
       <form class="mb-form" id="mb-form">
         <input type="text" id="mb-input"
                placeholder="Search memories (e.g. 'dark mode', 'meeting')…"
                autocomplete="off" />
-        <select id="mb-tier" title="Tier filter">
-          <option value="">all</option>
-          <option value="1">L1 hot</option>
-          <option value="2">L1+L2</option>
-          <option value="3">L1+L2+L3</option>
+        <select id="mb-tier" title="Tier ceiling (tier_max — searches tiers ≤ N)">
+          <option value="">all (L0–L5)</option>
+          <option value="0">L0 instinct</option>
+          <option value="1">≤ L1 hot</option>
+          <option value="2">≤ L2 warm</option>
+          <option value="3">≤ L3 cold</option>
+          <option value="4">≤ L4 pattern</option>
         </select>
         <button type="submit">Find</button>
       </form>

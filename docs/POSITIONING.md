@@ -6,7 +6,7 @@
 
 ## One-line summary
 
-**Mnemosyne is a complete, local-first, consciousness-aware agent framework whose differentiators are (1) a three-tier ICMS memory model backed by SQLite+FTS5, (2) a consciousness/meta-harness layer (TurboQuant, metacognition, dream consolidation, autobiography, behavioral coupling) that operates on the base harness between turns, and (3) a Meta-Harness-aligned observability substrate (telemetry, experiments, sweep, scenarios, Pareto) designed for optimization — not monitoring.** It is deliberately zero-dependency Python (stdlib + optional eternal-context/fantastic-disco) and is packaged for one-command install via `pip install -e .`.
+**Mnemosyne is a complete, local-first, consciousness-aware agent framework whose differentiators are (1) a six-tier ICMS memory model (L0 instinct through L5 identity) backed by SQLite+FTS5, (2) a consciousness/meta-harness layer (TurboQuant, metacognition, dream consolidation, autobiography, behavioral coupling) that operates on the base harness between turns, and (3) a Meta-Harness-aligned observability substrate (telemetry, experiments, sweep, scenarios, Pareto) designed for optimization — not monitoring.** It is deliberately zero-dependency Python (stdlib + optional eternal-context/fantastic-disco) and is packaged for one-command install via `pip install -e .`.
 
 ---
 

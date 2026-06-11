@@ -64,8 +64,8 @@ opaque "personality engine."
 | **Orbiting dots** | `skills_count` (capped 12) | skill registry size |
 | **Outer dashed wisdom ring** | opacity scales with `wisdom`; rotates slowly | derived from memory × age × identity |
 | **Eye openness** | `mood_phase` ("focus" wide, "rest" narrow) | derived |
-| **Memory roots (3 lines down)** | `l1_count`, `l2_count`, `l3_count` log-scaled | `memory.db` row counts |
-| **Habitat wave bands (bottom)** | three soft bands; heights scale with L1/L2/L3 proportions | same counts as roots |
+| **Memory roots (6 lines down)** | `l0_count` … `l5_count` log-scaled, one root per ICMS tier | `memory.db` row counts |
+| **Habitat wave bands (bottom)** | six soft bands; heights scale with L0–L5 proportions (deeper band = longer-term tier) | same counts as roots |
 | **Red rim scars** | `identity_slip_count` | `identity_slip_detected` events |
 | **Consolidate-mode petals** | only when `mood_phase=="consolidate"` | dream cadence > inner cadence |
 | **Color palette** | `palette.{core, accent, rim, bg}` derived from health × activity | deterministic mapping |
@@ -165,19 +165,16 @@ not tiers themselves):
 | L4 | Pattern | consolidated patterns from dream consolidation |
 | L5 | Identity | human-approved identity memories |
 
-`GET /stats` reports row counts for all six tiers in `by_tier`, and
-the topbar memory-count pill is the total across L0–L5. The "Memory
-tiers" panel charts the conversational tiers (L1/L2/L3) as
-proportional bars — those are the tiers a live chat session writes
-to and the ones that move turn-by-turn; L0/L4/L5 counts are in the
-`/stats` payload.
+`GET /stats` reports row counts for all six tiers in `by_tier`; the
+"Memory tiers" panel charts all six as proportional bars, and the
+topbar memory-count pill is the total across L0–L5.
 
 ## Memory browser
 
 The bottom panel of the dashboard is a live FTS5 search over the
 agent's memory. Type a query, pick a tier ceiling (`tier_max` —
-unset searches all six tiers L0–L5; the dropdown presets cap at
-L1, L2, or L3), hit `Find` — results stream back with the matching
+`all` searches every tier L0–L5; the other presets cap the search
+at L0 through L4), hit `Find` — results stream back with the matching
 content, tier pill, kind, creation date, and access count.
 
 Use cases:

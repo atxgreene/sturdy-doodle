@@ -93,10 +93,10 @@ has_api_key:    False
 **Platform:** Linux 6.18.5, Python 3.11.15
 
 ────────────────────────────────────────────────────────────────
- 4/18  Memory layer — SQLite+FTS5 with ICMS 3-tier
+ 4/18  Memory layer — SQLite+FTS5 with 6-tier ICMS (L0–L5)
 ────────────────────────────────────────────────────────────────
 
-── Writing 4 memories across all three tiers
+── Writing 4 memories across tiers L1–L3
 1
 2
 3

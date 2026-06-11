@@ -207,15 +207,17 @@ async function refreshMemory() {
   try {
     const stats = await jget("/stats");
     const tiers = (stats.memory && stats.memory.by_tier) || {};
-    const l1 = tiers.L1_hot || 0;
-    const l2 = tiers.L2_warm || 0;
-    const l3 = tiers.L3_cold || 0;
-    const max = Math.max(1, l1, l2, l3);
+    // Full 6-tier ICMS — L0 Instinct through L5 Identity, nothing above.
+    const rows = [["L0", tiers.L0_instinct || 0, "l0"],
+                    ["L1", tiers.L1_hot      || 0, "l1"],
+                    ["L2", tiers.L2_warm     || 0, "l2"],
+                    ["L3", tiers.L3_cold     || 0, "l3"],
+                    ["L4", tiers.L4_pattern  || 0, "l4"],
+                    ["L5", tiers.L5_identity || 0, "l5"]];
+    const max = Math.max(1, ...rows.map(([, n]) => n));
     const bars = document.getElementById("memory-bars");
     bars.innerHTML = "";
-    for (const [label, n, cls] of [["L1", l1, "l1"],
-                                      ["L2", l2, "l2"],
-                                      ["L3", l3, "l3"]]) {
+    for (const [label, n, cls] of rows) {
       const row = document.createElement("div");
       row.className = `memory-row ${cls}`;
       row.innerHTML = `<span class="label">${label}</span>`
