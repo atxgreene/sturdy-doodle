@@ -156,6 +156,38 @@ substrate search; cite accordingly. The like-for-like point is
 architectural: a local FTS5 search is ~50× faster than a hosted
 memory-API search before any answer model runs.
 
+## 3.5 Efficiency frontier — breaking the norm
+
+The agent-memory leaderboard (Mem0, Zep, Honcho) races one number: LLM-judged
+accuracy. That race hides what decides whether memory is usable in a live agent
+loop — tokens, cost, latency, and locality per answer. `bench/efficiency_frontier.py`
+reports those directly (run 2026-07-01, artifact
+[`benchmark-results/2026-07-01-locomo-efficiency-frontier.json`](./benchmark-results/2026-07-01-locomo-efficiency-frontier.json)):
+
+| k | answer-in-context | tokens/probe | **utility per 1k tok** | % of full-context tokens | $/1k questions¹ | search p50 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 0.4377 | 81 | **5.40** | 0.31% | $0.012 | 1.7 ms |
+| 4 | 0.5422 | 160 | 3.39 | 0.62% | $0.024 | 2.1 ms |
+| 8 | 0.6247 | 319 | 1.96 | 1.23% | $0.048 | 2.6 ms |
+| 16 | 0.6948 | 643 | 1.08 | 2.47% | $0.096 | 3.7 ms |
+| 32 | 0.7552 | 1,296 | 0.58 | 4.99% | $0.194 | 6.4 ms |
+| full-context | 0.8727 | 22,576 | — | 100% | $3.386 | — |
+
+¹ cost to feed the retrieved context to an answer LLM at $0.15/1M input tokens
+(illustrative; retrieval itself is **$0** — no API, no network). Set your
+provider's price with `--input-price-per-1m`.
+
+**The norm-breaking result:** k=32 reaches **86.5% of the full-context accuracy
+on 94% fewer tokens**; feeding full history to the answer model costs **17.4× more
+per 1,000 questions** for a 16-point accuracy gain. Shallow retrieval (k=2) buys
+the most answer-coverage per token (**5.4 correct-answer-units per 1k tokens**) —
+pick your point on the curve by your model's context budget and your cost target.
+
+This is the axis Mnemosyne is built to win: competitive recall at 1–5% of the
+token load, locally, at zero retrieval cost, with p50 search in single-digit ms.
+Accuracy-at-any-cost is the norm; **usable memory per token/dollar/millisecond**
+is the frontier.
+
 ## 4. How this relates to published LOCOMO numbers
 
 Published memory-system numbers (Mem0 paper, arXiv 2504.19413; all
