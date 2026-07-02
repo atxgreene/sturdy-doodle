@@ -113,25 +113,54 @@ curl -L https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo1
 `bench/data/` is gitignored so the 2.8 MB JSON never accidentally
 gets committed.
 
-### Substring judge (fast, no API key, lower bound)
+### Retrieval track (fast, no API key, deterministic)
 
-The cheapest path: substring judge (case-insensitive substring /
-token match between expected and actual answer). Fast, no API, runs
-on the retrieval-only or LLM-grounded path.
+The zero-cost path: retrieval-only with the substring judge
+(case-insensitive substring / token match between expected answer
+and retrieved context) plus **evidence recall@k** (judge-free —
+fraction of gold `evidence` dia_ids found in the top-k retrieved
+rows). Full 1,986-question run takes ~15 s and 0 USD. Published
+numbers: [`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md).
 
 ```sh
-# Retrieval-only smoke test (no LLM anywhere; measures substrate)
-python3 bench/locomo.py --substrate mnemosyne \
-    --max-samples 1 --max-questions-per-sample 20 \
-    --verbose --out bench/results/mnemo-retrieval-smoke.json
+# Headline retrieval run (FTS5 top-8) — the substrate number
+python3 bench/locomo.py --substrate mnemosyne --retrieval-mode fts \
+    --out bench/results/locomo-fts-full.json
 
-# LM Studio-grounded smoke test (same subsample, model answers each Q)
+# Same-protocol baselines + ceiling for the comparison table
+python3 bench/locomo.py --substrate mnemosyne --retrieval-mode recency \
+    --out bench/results/locomo-recency-full.json
+python3 bench/locomo.py --substrate mnemosyne --retrieval-mode random \
+    --out bench/results/locomo-random-full.json
+python3 bench/locomo.py --substrate mnemosyne --retrieval-mode full \
+    --out bench/results/locomo-full-full.json
+
+# Token/score trade-off sweep
+for k in 2 4 8 16 32; do
+  python3 bench/locomo.py --substrate mnemosyne --top-k $k \
+      --out bench/results/locomo-fts-k$k.json
+done
+```
+
+Scoring protocol: the headline `score` covers the **1,540
+non-adversarial questions** (categories 1-4), matching how published
+LOCOMO evals (e.g. Mem0, arXiv 2504.19413) report theirs. Category 5
+(adversarial, 446 questions) requires a model to *abstain*, which is
+meaningless without an LLM; it is judged by abstention-phrase
+detection in `--llm-grounded` runs and reported separately. Every
+report JSON embeds dataset sha256, git commit, latency p50/p95,
+token estimates, ingest throughput, and the exact argv.
+
+### LLM-grounded (measures the full agent stack)
+
+```sh
+# LM Studio-grounded smoke test (model answers each Q from retrieved context)
 python3 bench/locomo.py --substrate mnemosyne \
     --llm-grounded --provider lmstudio --model <your-model-id> \
     --max-samples 1 --max-questions-per-sample 20 \
     --verbose --out bench/results/mnemo-lmstudio-smoke.json
 
-# Full run: 10 samples × ~199 questions × model_turn_latency × 2
+# Full run: 10 samples × ~199 questions × model_turn_latency
 # On a 7-8B q4_K_M model that's 1-3 hours. Use --verbose.
 python3 bench/locomo.py --substrate mnemosyne \
     --llm-grounded --provider lmstudio --model <your-model-id> \
@@ -169,13 +198,19 @@ python3 bench/locomo.py --substrate mem0 \
 
 LOCOMO categories (integer 1-5 in the JSON; renamed by our runner):
 
-| Code | Our name | LOCOMO meaning |
-| :--: | :--- | :--- |
-| 1 | `single_hop` | Answer in one dialog turn |
-| 2 | `multi_hop` | Answer requires combining multiple turns |
-| 3 | `temporal` | Answer requires reasoning about time |
-| 4 | `open_domain` | Answer draws on external knowledge beyond the dialog |
-| 5 | `adversarial` | Answer is "I don't know" — question isn't in the dialog |
+| Code | Our name | n | LOCOMO meaning |
+| :--: | :--- | --: | :--- |
+| 1 | `multi_hop` | 282 | Answer requires combining multiple turns |
+| 2 | `temporal` | 321 | Answer requires reasoning about time ("When did…") |
+| 3 | `open_domain` | 96 | Answer draws on knowledge beyond the dialog |
+| 4 | `single_hop` | 841 | Answer in one dialog turn |
+| 5 | `adversarial` | 446 | Correct answer is abstention — question isn't answerable from the dialog (`adversarial_answer` field, no `answer`) |
+
+> ⚠️ Runner versions before v0.9.8 had 1↔4 and 2↔3 swapped, so
+> per-category numbers from older runs are mislabeled (totals were
+> unaffected). The mapping above is verified against the data itself
+> (category 2 = "When did…" questions) and matches Mem0's published
+> evaluation code.
 
 Reports land in `bench/results/` (gitignored — don't commit raw
 conversation samples or outputs).
@@ -186,10 +221,37 @@ conversation samples or outputs).
 
 | File | Purpose |
 |---|---|
-| `locomo.py` | LOCOMO runner with `MnemosyneSubstrate` + `Mem0Substrate` adapters. Supports retrieval-only and LLM-grounded modes. |
+| `locomo.py` | LOCOMO runner with `MnemosyneSubstrate` + `Mem0Substrate` adapters. Retrieval-only + LLM-grounded modes, baseline retrieval modes (recency/random/full), evidence recall@k, latency/token/cost instrumentation. |
+| `longmemeval.py` | LongMemEval runner (arXiv 2410.10813). Session-level + turn-level retrieval recall@k, abstention handling, same instrumentation. `--selftest` validates the runner on a synthetic schema-faithful fixture with no dataset/network/LLM. |
 | `requirements.txt` | Optional deps — `datasets`, `mem0ai`, `openai`, `sentence-transformers`, `tiktoken`. NOT in main pyproject. |
 | `README.md` | This file. |
-| (planned) `longmemeval.py` | LongMemEval runner once the LOCOMO comparison is stable. |
+
+## LongMemEval benchmark
+
+LongMemEval (Wu et al., ICLR 2025 — [xiaowu0162/LongMemEval](https://github.com/xiaowu0162/LongMemEval))
+tests five long-term memory abilities over timestamped multi-session
+histories. 500 questions; `longmemeval_s` ≈ 115k tokens of history
+per question. Dataset is released on HuggingFace (we don't
+redistribute it):
+
+```sh
+mkdir -p bench/data
+wget -P bench/data https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json
+wget -P bench/data https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json
+
+# Validate the runner first (no dataset needed):
+python3 bench/longmemeval.py --selftest
+
+# Retrieval-only run (session/turn recall@k + answer-in-context):
+python3 bench/longmemeval.py \
+    --dataset bench/data/longmemeval_s_cleaned.json \
+    --verbose --out bench/results/longmemeval-s-retrieval.json
+```
+
+Abstention questions (`question_id` ending `_abs`) are excluded from
+the headline score in retrieval-only mode and judged via abstention
+detection in `--llm-grounded` runs — same protocol as LOCOMO
+category 5.
 
 ---
 
@@ -220,10 +282,17 @@ in `docs/BENCHMARKS_v0.7.md` with credit to the runner.
 
 ---
 
-## Status as of v0.8.0
+## Status as of v0.9.8
 
-- `locomo.py` — runner shipped; LM Studio + Mem0 adapters wired.
-- Mnemosyne LM Studio Continuity numbers — recommend running tonight
-  via the Quick Path above. Expected: live model > 0.96 aggregate.
-- Mem0 head-to-head — runner ready; numbers blocked on real run.
-- LongMemEval — not yet stubbed.
+- `locomo.py` — full retrieval track **run and published**
+  (2026-06-11): FTS top-8 0.6247 vs recency 0.2468 / random 0.2799 /
+  full-context ceiling 0.8727 over the 1,540 non-adversarial
+  questions. See [`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md)
+  and [`docs/benchmark-results/2026-06-11-locomo-retrieval-track.json`](../docs/benchmark-results/2026-06-11-locomo-retrieval-track.json).
+- `longmemeval.py` — runner shipped with `--selftest` (passing);
+  retrieval numbers pending a machine with HuggingFace access (the
+  dataset is HF/Drive-only).
+- LLM-grounded LOCOMO + Mem0 head-to-head — runners ready; numbers
+  blocked on an LLM endpoint / `OPENAI_API_KEY` at run time.
+- Continuity Score — multi-model results published in
+  [`docs/benchmark-results/`](../docs/benchmark-results/).

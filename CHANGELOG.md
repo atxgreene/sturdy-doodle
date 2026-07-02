@@ -2,6 +2,54 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.8-bench] — 2026-06-11 — measured LOCOMO retrieval track + LongMemEval runner
+
+Full LOCOMO retrieval-track results published with reproducible
+setup, same-protocol baselines, and token/latency/cost detail; new
+LongMemEval runner with a passing dataset-free selftest. Report:
+`docs/BENCHMARKS_LOCOMO.md`; dated raw JSON:
+`docs/benchmark-results/2026-06-11-locomo-retrieval-track.json`.
+
+**Measured (Linux x86_64 sandbox, Python 3.11, stdlib only, $0):**
+
+| mode | answer-in-context (1,540 q) | evidence recall@8 | ctx tokens/probe |
+| :--- | :--: | :--: | :--: |
+| Mnemosyne FTS top-8 | **0.6247** | **0.5009** | 319 |
+| recency-8 baseline  | 0.2468 | 0.0054 | 299 |
+| random-8 baseline   | 0.2799 | 0.0198 | 302 |
+| full-context ceiling | 0.8727 | 0.9961 | 22,576 |
+
+Plus a top-k sweep (k=2→32: 0.4377→0.7552), search p50 2.76 ms /
+p95 21.9 ms, ingest 2,467 writes/s, 13 s wall clock for the full
+1,986-question run.
+
+**Protocol corrections (erratum):**
+- Headline score now uses the standard 1,540 non-adversarial
+  questions (matching published LOCOMO evals). The earlier
+  0.4849/1,986 figure counted 446 adversarial questions —
+  unanswerable without a model to abstain — as failures
+  (962/1986 = 0.4844, same underlying run quality).
+- Fixed `bench/locomo.py` category mapping (was 1↔4 / 2↔3 permuted
+  vs the snap-research evaluation code: 1=multi-hop, 2=temporal,
+  3=open-domain, 4=single-hop). Old per-category rows were
+  mislabeled; totals unaffected.
+
+**Runner upgrades (`bench/locomo.py` v0.9.8):**
+- evidence recall@k (judge-free, from gold `evidence` dia_ids);
+- baseline retrieval modes `--retrieval-mode recency|random|full`;
+- adversarial scored via abstention detection in `--llm-grounded`;
+- latency p50/p95, token estimates, ingest throughput, dataset
+  sha256, git commit + argv embedded in every report JSON.
+
+**New: `bench/longmemeval.py`** (arXiv 2410.10813, ICLR 2025) —
+session-level + turn-level retrieval recall@k, abstention handling,
+same instrumentation and baselines, `--selftest` validating the full
+pipeline on a synthetic schema-faithful fixture (7/7 passing; the
+dataset itself is HF/Drive-only and not redistributable).
+
+Docs refreshed with the corrected numbers: README, ROADMAP, HERMES,
+BENCHMARKS, bench/README, integrations/hermes/README, landing page.
+
 ## [0.9.7] — 2026-04-17 — multi-run multi-model Continuity benchmark results
 
 Three new benchmark reports in `docs/benchmark-results/` + updated

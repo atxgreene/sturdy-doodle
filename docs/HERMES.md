@@ -43,12 +43,16 @@ Claims below are scoped to what is measured or architecturally factual.
 
 3. **Published, reproducible benchmarks with regression gates.**
    The provider ships with an eval harness: a deterministic retrieval
-   probe set (recall@5 / MRR / hit@1 by category) and a full LOCOMO
-   runner, with recorded baselines (retrieval recall@5 0.8704, LOCOMO
-   retrieval-only 0.4849 across 1,986 questions) and a
-   `check_regression.py` gate that fails any change that drops a
-   metric. To our knowledge no other Hermes memory provider publishes
-   eval-gated baselines; if you find one, run ours against it.
+   probe set (recall@5 / MRR / hit@1 by category) and full LOCOMO +
+   LongMemEval runners, with recorded baselines (retrieval recall@5
+   0.8704; LOCOMO retrieval track 0.6247 answer-in-context /
+   0.5009 evidence recall@8 over the standard 1,540 scored
+   questions, vs 0.2468 recency and 0.2799 random same-protocol
+   baselines — see [BENCHMARKS_LOCOMO.md](./BENCHMARKS_LOCOMO.md))
+   and a `check_regression.py` gate that fails any change that drops
+   a metric. To our knowledge no other Hermes memory provider
+   publishes eval-gated baselines; if you find one, run ours against
+   it.
 
 4. **Offline services on top of the same store.** Dream consolidation,
    pattern compaction, and reflection → instinct distillation operate
