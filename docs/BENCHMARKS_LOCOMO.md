@@ -240,7 +240,7 @@ benchmark fights start. The honest comparisons available today:
 > authors' `evaluation.py` treats category 1 as multi-hop); align by
 > question counts (282/321/96/841) when comparing per-category cells.
 
-## 5. LongMemEval — runner shipped, numbers pending
+## 5. LongMemEval — first grounded numbers measured (oracle split)
 
 LongMemEval (arXiv 2410.10813, ICLR 2025) is the second standard:
 500 questions over timestamped multi-session histories
@@ -263,10 +263,31 @@ gpt-4o vs 60.2% full-context baseline, using ~1.6k context tokens vs
   validates the full pipeline with no dataset, network, or LLM
   (currently passing 7/7 checks).
 
-The dataset is distributed via HuggingFace/Google Drive only, which
-the sandbox that produced this page cannot reach — so unlike §3 we do
-not publish guessed numbers. Produce them on any machine with HF
-access:
+### Measured: grounded run on the oracle split (2026-07)
+
+First real LongMemEval numbers, run locally against LM Studio:
+
+| | score | scored questions | provider / model |
+|---|---:|---:|---|
+| **LongMemEval oracle, LLM-grounded** | **0.6894** | 324/470 | LM Studio `qwen3-vl-4b-bench` |
+
+Read this number for what it is: the **oracle split** supplies only
+the evidence sessions (no 115k-token haystack), so it measures
+*answer generation from correctly-scoped memory*, not needle-finding.
+Abstention questions (`*_abs`) are excluded from the headline per the
+runner's standard protocol (470 scored of 500). Reference point: the
+LongMemEval paper's oracle-retrieval ceiling for much larger frontier
+models is in the 80s — 0.6894 from a local 4B model over the same
+protocol is the honest small-model baseline for this stack. The raw
+report JSON (dataset sha256, argv, per-question records) is recorded
+on the run machine (`bench/results/longmemeval-oracle-lmstudio-qwen3-vl-4b-grounded.json`
++ `.runlog.txt`) and lands in `docs/benchmark-results/` as a dated
+artifact in a follow-up commit — `bench/results/` itself is
+gitignored by policy.
+
+Still pending: the `longmemeval_s` haystack split (retrieval track),
+which is the number comparable to Zep's 71.2% / full-context 60.2%.
+Produce it on any machine with HF access:
 
 ```sh
 mkdir -p bench/data
@@ -284,6 +305,24 @@ are welcome and will be credited.
 ## 6. Measuring the full stack (LLM-grounded)
 
 Retrieval-only is the floor. To measure Mnemosyne + your model:
+
+### Measured: full grounded LOCOMO run (2026-07)
+
+| | score | scored questions | provider / model |
+|---|---:|---:|---|
+| **LOCOMO full, LLM-grounded** | **0.3292** | 507/1540 | LM Studio `ternary-bonsai-8b-mlx-bench` |
+
+Same denominator as the retrieval track (1,540 non-adversarial
+questions). The gap vs the 0.6247 retrieval-track answer-in-context
+score is the *model* term: retrieval puts the answer in context
+~62% of the time, and an 8B ternary-quantized local model then
+produces a judged-correct answer about half of those times. This is
+**not** comparable to published GPT-4-judged LOCOMO numbers (e.g.
+Mem0's ~0.66) — different generator and judge; reproduce their
+protocol with `--judge openai` to compare. Raw report JSON + run log
+are on the run machine
+(`bench/results/locomo-grounded-full.json` / `.runlog.txt`), to be
+committed to `docs/benchmark-results/` as dated artifacts.
 
 ```sh
 python3 bench/locomo.py --substrate mnemosyne --llm-grounded \

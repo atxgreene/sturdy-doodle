@@ -289,10 +289,13 @@ in `docs/BENCHMARKS_v0.7.md` with credit to the runner.
   full-context ceiling 0.8727 over the 1,540 non-adversarial
   questions. See [`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md)
   and [`docs/benchmark-results/2026-06-11-locomo-retrieval-track.json`](../docs/benchmark-results/2026-06-11-locomo-retrieval-track.json).
-- `longmemeval.py` — runner shipped with `--selftest` (passing);
-  retrieval numbers pending a machine with HuggingFace access (the
-  dataset is HF/Drive-only).
-- LLM-grounded LOCOMO + Mem0 head-to-head — runners ready; numbers
-  blocked on an LLM endpoint / `OPENAI_API_KEY` at run time.
+- `longmemeval.py` — **oracle-split grounded run measured (2026-07)**:
+  0.6894 (324/470 scored) with LM Studio `qwen3-vl-4b-bench`; see
+  [`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md) §5.
+  `longmemeval_s` haystack-split retrieval numbers still pending.
+- LLM-grounded LOCOMO — **full run measured (2026-07)**: 0.3292
+  (507/1540) with LM Studio `ternary-bonsai-8b-mlx-bench`; see
+  [`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md) §6.
+  Mem0 head-to-head still blocked on `OPENAI_API_KEY` at run time.
 - Continuity Score — multi-model results published in
   [`docs/benchmark-results/`](../docs/benchmark-results/).

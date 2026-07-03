@@ -17,9 +17,12 @@ from *my* hardware, it's labelled as such — your mileage will vary.
   1,540 scored questions, vs same-protocol recency (0.2468), random
   (0.2799) baselines and full-context ceiling (0.8727); top-k
   token/score sweep; search p50 2.76 ms; $0 cost; dated raw JSON in
-  [`benchmark-results/`](./benchmark-results/). LongMemEval runner
-  shipped with passing `--selftest`; numbers pending a machine with
-  HuggingFace access. Runner usage: [`bench/README.md`](../bench/README.md).
+  [`benchmark-results/`](./benchmark-results/). **Grounded full-stack
+  numbers measured (2026-07)**: LOCOMO grounded 0.3292 (507/1540,
+  `ternary-bonsai-8b`) and LongMemEval oracle grounded 0.6894
+  (324/470, `qwen3-vl-4b`), both via LM Studio — details in
+  BENCHMARKS_LOCOMO.md §5–6. The `longmemeval_s` haystack split is
+  still pending. Runner usage: [`bench/README.md`](../bench/README.md).
   Datasets are never redistributed; fetch them from upstream.
 - **Throughput + instrumentation overhead** (below) → v0.2-era
   reference numbers. Not re-run against the v0.9 substrate;
